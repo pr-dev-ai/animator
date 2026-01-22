@@ -1,0 +1,46 @@
+# Environment
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Docker
+.docker/
+
+# Generated content
+outputs/
+voices/*.wav
+voices/*.json
+models/*.safetensors
+models/*.ckpt
+models/*.pt
+models/*.pth
+
+# ComfyUI (cloned repository)
+comfyui/ComfyUI/
+
+# Project outputs
+projects/*/animatic/
+projects/*/renders/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

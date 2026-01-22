@@ -1,0 +1,13 @@
+shot_id,description,camera,duration,notes
+SH010,Establishing shot of building at night,Wide,3.0,Exterior, one lit window
+SH020,Operator at console,Medium,4.0,Multiple monitors visible
+SH030,Close-up of monitor feed,Close-up,2.5,Empty hallway, static flickers
+SH040,Operator notices anomaly,Medium,3.0,Leans forward
+SH050,Operator's tense expression,Close-up,2.0,First dialogue
+SH060,Monitor shows figure,Close-up,3.0,Unnatural movement
+SH070,Operator reaches for radio,Medium,2.5,Hand hovers
+SH080,Hand on radio button,Close-up,2.0,Hesitation
+SH090,Wide shot of control room,Wide,4.0,Alone, screens flicker
+SH100,Operator looks at camera,Close-up,3.0,Second dialogue, fear
+SH110,Monitor goes to static,Close-up,2.0,Feed cuts out
+SH120,Fade to black,Black,2.0,End

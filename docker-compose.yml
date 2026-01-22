@@ -1,0 +1,52 @@
+services:
+  comfyui:
+    build:
+      context: ./comfyui
+      dockerfile: Dockerfile
+    container_name: comfyui
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    ports:
+      - "8188:8188"
+    volumes:
+      - ./models:/app/workspace/ComfyUI/models
+      - ./outputs:/app/workspace/ComfyUI/output
+      - ./comfyui:/app/workspace
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8188 || wget --quiet --tries=1 --spider http://localhost:8188 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  piper:
+    build:
+      context: ./piper
+      dockerfile: Dockerfile
+    container_name: piper
+    ports:
+      - "10200:5000"
+    volumes:
+      - ./piper:/config
+      - ./voices:/voices
+    restart: unless-stopped
+    # Healthcheck disabled - Piper runs as CLI tool, not HTTP service by default
+    # Use docker exec for TTS generation
+
+  rhubarb:
+    build:
+      context: ./rhubarb
+      dockerfile: Dockerfile
+    container_name: rhubarb
+    volumes:
+      - ./voices:/voices
+    restart: unless-stopped
+    # No healthcheck - container runs sleep infinity for exec usage
