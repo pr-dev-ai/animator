@@ -48,20 +48,34 @@ def generate_tts_via_service(text: str, voice_id: str, output_path: Path, langua
         logger.debug(f"HTTP API failed: {e}, trying docker exec")
 
     # Fallback to docker exec (CLI mode)
-    # Note: This requires piper binary or piper-tts package to be properly installed
-    # Voice models should be in ./piper/ directory
+    # Note: This requires piper binary and voice models in ./piper/ directory
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        # Try using piper-tts Python package
-        # The exact command may vary based on piper-tts package version
         container_output = f"/voices/{output_path.relative_to(VOICES_DIR)}"
+        model_path = f"/config/{voice_id}.onnx"
+        
+        # Check if model exists in container
+        check_cmd = ["docker", "exec", "piper", "test", "-f", model_path]
+        check_result = subprocess.run(check_cmd, capture_output=True)
+        if check_result.returncode != 0:
+            logger.error(f"Voice model not found: {voice_id}.onnx")
+            logger.info(f"Expected location in container: {model_path}")
+            logger.info("Download models from: https://github.com/rhasspy/piper/releases")
+            logger.info("Place model files in ./piper/ directory on host")
+            return False
+        
+        # Use piper binary with stdin input (properly handles quotes and special chars)
+        # piper reads from stdin by default if no -i flag is provided
         cmd = [
             "docker", "exec", "-i", "piper",
-            "bash", "-c",
-            f"echo '{text}' | python3 -m piper_tts --model /config/{voice_id}.onnx --output_file {container_output}"
+            "piper",
+            "-m", model_path,
+            "-f", container_output
         ]
+        
         result = subprocess.run(
             cmd,
+            input=text,
             capture_output=True,
             text=True,
             timeout=30

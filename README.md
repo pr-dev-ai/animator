@@ -145,6 +145,8 @@ Services started:
 
 **📖 For detailed usage instructions, see [USAGE.md](USAGE.md)**
 
+**⚠️ If your system restarts when generating images, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)**
+
 ---
 
 ## 📂 Repository Structure
@@ -187,14 +189,19 @@ projects/night_shift/
 
 ## 🗣️ Automatic Voice & Lip-Sync Flow
 
+**First-time setup:**
+```bash
+./scripts/setup_host.sh  # Creates virtual environment and installs dependencies
+```
+
 ### Generate voices
 ```bash
-python3 scripts/gen_tts.py --project night_shift
+./run_script.sh python3 scripts/gen_tts.py --project night_shift
 ```
 
 ### Generate lip-sync data
 ```bash
-python3 scripts/gen_lipsync.py --project night_shift
+./run_script.sh python3 scripts/gen_lipsync.py --project night_shift
 ```
 
 Outputs:

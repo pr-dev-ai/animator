@@ -136,6 +136,8 @@ The `night_shift` project is included as an example. You can:
 
 ## Generating Storyboards
 
+**📖 For detailed ComfyUI configuration, see [COMFYUI_GUIDE.md](COMFYUI_GUIDE.md)**
+
 ### Method 1: Using ComfyUI Web Interface (Recommended)
 
 1. **Open ComfyUI:**
@@ -185,14 +187,32 @@ The `night_shift` project is included as an example. You can:
 
 ### Prerequisites
 
-- Services running: `./app.sh start`
-- `dialogue.csv` file in your project directory
+- **Services running**: `./app.sh start` (Piper container must be running)
+- **Host Python setup**: Install Python dependencies on your host machine
+  ```bash
+  # One-time setup (if not already done)
+  ./scripts/setup_host.sh
+  ```
+  This creates a Python virtual environment (`.venv/`) and installs dependencies.
+- **dialogue.csv** file in your project directory
 
 ### Generate Voices
 
+**Run from your host machine (not inside Docker):**
+
+**Option 1: Using helper script (recommended)**
 ```bash
-python3 scripts/gen_tts.py --project night_shift
+./run_script.sh python3 scripts/gen_tts.py --project night_shift
 ```
+
+**Option 2: Manual activation**
+```bash
+source .venv/bin/activate
+python3 scripts/gen_tts.py --project night_shift
+deactivate
+```
+
+**Note:** This script runs on your host and uses `docker exec` to call the Piper container.
 
 This will:
 - Read `projects/night_shift/dialogue.csv`
@@ -226,13 +246,26 @@ python3 scripts/gen_tts.py --project night_shift --force
 ### Prerequisites
 
 - TTS WAV files generated (from previous step)
-- Services running: `./app.sh start`
+- **Services running**: `./app.sh start` (Rhubarb container must be running)
+- **Host Python setup**: Same as TTS (pip3 and requirements.txt)
 
 ### Generate Lip-Sync Data
 
+**Run from your host machine (not inside Docker):**
+
+**Option 1: Using helper script (recommended)**
 ```bash
-python3 scripts/gen_lipsync.py --project night_shift
+./run_script.sh python3 scripts/gen_lipsync.py --project night_shift
 ```
+
+**Option 2: Manual activation**
+```bash
+source .venv/bin/activate
+python3 scripts/gen_lipsync.py --project night_shift
+deactivate
+```
+
+**Note:** This script runs on your host and uses `docker exec` to call the Rhubarb container.
 
 This will:
 - Find all WAV files in `voices/night_shift/`
@@ -270,13 +303,26 @@ python3 scripts/gen_lipsync.py --project night_shift --force
 
 - Storyboard images in `outputs/<project>_storyboards/`
 - Optional: TTS audio files in `voices/<project>/`
-- FFmpeg installed: `sudo apt install ffmpeg`
+- **FFmpeg installed on host**: `sudo apt install ffmpeg`
+- **Host Python setup**: Same as TTS (pip3 and requirements.txt)
 
 ### Generate Animatic
 
+**Run from your host machine (not inside Docker):**
+
+**Option 1: Using helper script (recommended)**
 ```bash
-python3 scripts/make_dailies.py --project night_shift
+./run_script.sh python3 scripts/make_dailies.py --project night_shift
 ```
+
+**Option 2: Manual activation**
+```bash
+source .venv/bin/activate
+python3 scripts/make_dailies.py --project night_shift
+deactivate
+```
+
+**Note:** This script runs entirely on your host using FFmpeg (no Docker containers needed).
 
 This will:
 - Read `shotlist.csv` for shot order and durations

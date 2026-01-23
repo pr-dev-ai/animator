@@ -11,18 +11,25 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv/
 
 # Docker
 .docker/
 
 # Generated content
 outputs/
-voices/*.wav
-voices/*.json
+outputs/**/*
+voices/
+voices/**/*
+models/checkpoints/
 models/*.safetensors
 models/*.ckpt
 models/*.pt
 models/*.pth
+
+# Piper voice models (large files)
+piper/*.onnx
+piper/*.onnx.json
 
 # ComfyUI (cloned repository)
 comfyui/ComfyUI/
