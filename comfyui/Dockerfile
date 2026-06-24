@@ -70,7 +70,7 @@ echo "Verifying dependencies..."\n\
 pip3 install --no-cache-dir -r requirements.txt 2>&1 | tail -3 || true\n\
 python3 -c "import sqlalchemy, alembic, aiohttp" 2>/dev/null || pip3 install --no-cache-dir sqlalchemy alembic aiohttp\n\
 echo "Starting ComfyUI on port 8188..."\n\
-python3 main.py --listen 0.0.0.0 --port 8188\n\
+python3 main.py --listen 0.0.0.0 --port 8188 ${COMFYUI_ARGS:-}\n\
 ' > /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Expose port
