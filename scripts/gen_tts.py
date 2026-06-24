@@ -117,6 +117,7 @@ def process_dialogue_csv(project_name: str, force: bool = False):
             text = row.get("text", "").strip()
             voice_id = row.get("voice_id", "en_US-lessac-medium").strip()
             language = row.get("language", "en").strip()
+            row_type = row.get("type", "dialogue").strip()
 
             if not shot_id or not text:
                 logger.warning(f"Skipping row with missing shot_id or text")
@@ -124,6 +125,12 @@ def process_dialogue_csv(project_name: str, force: bool = False):
 
             output_filename = f"{shot_id}_{character}.wav"
             output_path = output_dir / output_filename
+
+            # Song and custom tracks are always skipped — user must supply recording via import_audio.py
+            if row_type in ("song", "custom"):
+                logger.info(f"Skipping TTS for {row_type} track (use import_audio.py to add your recording): {shot_id}")
+                skipped += 1
+                continue
 
             if output_path.exists() and not force:
                 logger.info(f"Skipping {output_filename} (already exists)")
