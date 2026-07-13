@@ -326,6 +326,20 @@ def _sse_stream(generator_fn, project: str) -> Response:
     )
 
 
+@app.route("/api/prompts/<string:project>")
+def load_prompts(project: str) -> Response | tuple[Response, int]:
+    """Return previously saved storyboard prompts for a project (no Claude call)."""
+    try:
+        prompts_file = REPO_ROOT / "projects" / project / "prompts" / "storyboards.json"
+        if not prompts_file.exists():
+            return _ok([])
+        import json as _json
+        return _ok(_json.loads(prompts_file.read_text(encoding="utf-8")))
+    except Exception as exc:
+        logger.exception("load_prompts failed for %s", project)
+        return _err(str(exc))
+
+
 @app.route("/api/storyboards/generate")
 def storyboards_generate() -> Response | tuple[Response, int]:
     project = request.args.get("project", "").strip()

@@ -12,6 +12,28 @@ const state = {
 };
 
 // ---------------------------------------------------------------------------
+// State persistence (localStorage)
+// ---------------------------------------------------------------------------
+const STORAGE_KEY = 'kidsAnimStudio_v1';
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      project: state.project,
+      lyrics: state.lyrics,
+      tab: document.querySelector('.sidebar-nav .nav-item.active')?.dataset.tab || 'project',
+    }));
+  } catch (_) {}
+}
+
+function loadPersistedState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+// ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
 
@@ -138,6 +160,8 @@ function switchTab(tabName) {
   // Load tab-specific data
   if (tabName === 'audio' && state.project) loadShotTable();
   if (tabName === 'storyboard' && state.project) loadGallery();
+
+  saveState();
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +234,7 @@ function setProject(name) {
   }
 
   toast(`Project "${name}" selected`, 'success');
+  saveState();
 }
 
 async function createProject() {
@@ -274,6 +299,7 @@ async function generateLyrics() {
     const textarea = document.getElementById('lyrics-textarea');
     if (textarea) textarea.value = data.data.lyrics_text;
 
+    saveState();
     toast('Lyrics generated!', 'success');
   } catch (err) {
     toast(`Failed to generate lyrics: ${err.message}`, 'error');
@@ -376,6 +402,7 @@ async function generatePrompts() {
       });
     }
 
+    saveState();
     toast(`Generated ${state.prompts.length} shot prompts!`, 'success');
   } catch (err) {
     toast(`Failed to generate prompts: ${err.message}`, 'error');
@@ -683,9 +710,59 @@ async function checkHealth() {
 // Init
 // ---------------------------------------------------------------------------
 
-document.addEventListener('DOMContentLoaded', () => {
+async function restoreSession() {
+  const saved = loadPersistedState();
+  if (!saved) return;
+
+  // Restore project silently (no toast — user didn't just select it)
+  if (saved.project) {
+    state.project = saved.project;
+    const selectEl = document.getElementById('project-select');
+    if (selectEl) selectEl.value = saved.project;
+    document.querySelectorAll('#project-list li:not(.projects-empty)').forEach(li => {
+      li.classList.toggle('selected', li.textContent === saved.project);
+    });
+    const hintSpan = document.querySelector('#project-hint .hint-text');
+    if (hintSpan) hintSpan.textContent = `Project "${saved.project}" selected. Click a tab in the sidebar to continue.`;
+
+    // Load saved prompts from disk
+    try {
+      const data = await api('GET', `/api/prompts/${encodeURIComponent(saved.project)}`);
+      state.prompts = data.data || [];
+      if (state.prompts.length) {
+        const listEl = document.getElementById('prompts-list');
+        if (listEl) {
+          listEl.style.display = 'block';
+          listEl.innerHTML = state.prompts.map(renderPromptCard).join('');
+          state.prompts.forEach(shot => {
+            const ta = listEl.querySelector(`#prompt-${CSS.escape(shot.shot_id)}`);
+            if (ta) ta.value = shot.prompt || '';
+          });
+        }
+      }
+    } catch (_) {}
+
+    // Reload gallery images from disk
+    loadGallery();
+  }
+
+  // Restore lyrics
+  if (saved.lyrics) {
+    state.lyrics = saved.lyrics;
+    const textarea = document.getElementById('lyrics-textarea');
+    if (textarea) textarea.value = saved.lyrics;
+    show('lyrics-result');
+    show('chords-section');
+  }
+
+  // Restore active tab
+  if (saved.tab) switchTab(saved.tab);
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
   switchTab('project');
-  loadProjectList();
+  await loadProjectList();
+  await restoreSession();
   checkHealth();
   setInterval(checkHealth, 30000);
 
