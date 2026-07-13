@@ -1,0 +1,361 @@
+"""Flask web UI server for the kids animation pipeline."""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Generator
+from pathlib import Path
+
+from dotenv import load_dotenv
+from flask import Flask, Response, jsonify, render_template, request, send_file, stream_with_context
+
+# ---------------------------------------------------------------------------
+# Bootstrap
+# ---------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(REPO_ROOT / ".env")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# App factory
+# ---------------------------------------------------------------------------
+
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB for audio uploads
+
+
+# ---------------------------------------------------------------------------
+# CORS — allow all origins for local development
+# ---------------------------------------------------------------------------
+
+
+@app.after_request
+def add_cors_headers(response: Response) -> Response:
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return response
+
+
+@app.route("/", methods=["OPTIONS"])
+@app.route("/api/<path:path>", methods=["OPTIONS"])
+def handle_preflight(path: str = "") -> Response:
+    return Response(status=204)
+
+
+# ---------------------------------------------------------------------------
+# Helper
+# ---------------------------------------------------------------------------
+
+
+def _ok(data: object) -> Response:
+    return jsonify({"ok": True, "data": data})
+
+
+def _err(message: str, status: int = 500) -> tuple[Response, int]:
+    return jsonify({"ok": False, "error": message}), status
+
+
+# ---------------------------------------------------------------------------
+# Routes — static page
+# ---------------------------------------------------------------------------
+
+
+@app.route("/")
+def index() -> str:
+    return render_template("index.html")
+
+
+# ---------------------------------------------------------------------------
+# Routes — health
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/health")
+def health() -> Response:
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        projects = pipeline_api.list_projects()
+        comfyui_ok = pipeline_api.check_comfyui_health()
+        return jsonify({"ok": True, "comfyui": comfyui_ok, "projects": projects})
+    except Exception as exc:
+        logger.exception("Health check failed")
+        return jsonify({"ok": False, "comfyui": False, "projects": [], "error": str(exc)}), 503
+
+
+# ---------------------------------------------------------------------------
+# Routes — projects
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/project/list")
+def project_list() -> Response | tuple[Response, int]:
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        projects = pipeline_api.list_projects()
+        return _ok(projects)
+    except Exception as exc:
+        logger.exception("project_list failed")
+        return _err(str(exc))
+
+
+@app.route("/api/project/create", methods=["POST"])
+def project_create() -> Response | tuple[Response, int]:
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        body = request.get_json(force=True) or {}
+        name: str = body.get("name", "").strip()
+        type_: str = body.get("type", "kids").strip()
+        if not name:
+            return _err("'name' is required", 400)
+        result = pipeline_api.create_project(name, type_)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("project_create failed")
+        return _err(str(exc))
+
+
+@app.route("/api/project/<string:name>/shots")
+def project_shots(name: str) -> Response | tuple[Response, int]:
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        shots = pipeline_api.get_project_shots(name)
+        return _ok(shots)
+    except Exception as exc:
+        logger.exception("project_shots failed for %s", name)
+        return _err(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Routes — Claude generation
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/generate/lyrics", methods=["POST"])
+def generate_lyrics() -> Response | tuple[Response, int]:
+    try:
+        from web_ui import claude_api  # lazy import
+
+        body = request.get_json(force=True) or {}
+        theme: str = body.get("theme", "")
+        style: str = body.get("style", "")
+        raw_verses = body.get("verses", 3)
+        try:
+            verses: int = int(raw_verses)
+        except (TypeError, ValueError):
+            return _err(f"'verses' must be an integer, got {raw_verses!r}", 400)
+        result = claude_api.generate_lyrics(theme, style, verses)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("generate_lyrics failed")
+        return _err(str(exc))
+
+
+@app.route("/api/generate/chords", methods=["POST"])
+def generate_chords() -> Response | tuple[Response, int]:
+    try:
+        from web_ui import claude_api  # lazy import
+
+        body = request.get_json(force=True) or {}
+        lyrics: str = body.get("lyrics", "")
+        result = claude_api.generate_chords(lyrics)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("generate_chords failed")
+        return _err(str(exc))
+
+
+@app.route("/api/generate/prompts", methods=["POST"])
+def generate_prompts() -> Response | tuple[Response, int]:
+    try:
+        from web_ui import claude_api  # lazy import
+        from web_ui import pipeline_api  # lazy import
+
+        body = request.get_json(force=True) or {}
+        project: str = body.get("project", "").strip()
+        style: str = body.get("style", "")
+        if not project:
+            return _err("'project' is required", 400)
+
+        shots = pipeline_api.get_project_shots(project)
+
+        style_guide_path = REPO_ROOT / "projects" / project / "styleguide.md"
+        style_guide: str = ""
+        if style_guide_path.exists():
+            style_guide = style_guide_path.read_text(encoding="utf-8")
+
+        # Merge style param into style_guide if both provided
+        if style and style_guide:
+            style_guide = f"Style: {style}\n\n{style_guide}"
+        elif style:
+            style_guide = style
+
+        prompts = claude_api.generate_storyboard_prompts(project, shots, style_guide)
+        pipeline_api.save_storyboard_prompts(project, prompts)
+        return _ok(prompts)
+    except Exception as exc:
+        logger.exception("generate_prompts failed")
+        return _err(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Routes — audio
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/audio/import", methods=["POST"])
+def audio_import() -> Response | tuple[Response, int]:
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        shot_id: str = request.form.get("shot_id", "").strip()
+        character: str = request.form.get("character", "").strip()
+        project: str = request.form.get("project", "").strip()
+
+        if not shot_id or not project:
+            return _err("'shot_id' and 'project' are required", 400)
+
+        wav_file = request.files.get("file")
+        if wav_file is None:
+            return _err("'file' is required", 400)
+
+        wav_bytes: bytes = wav_file.read()
+        result = pipeline_api.import_audio(project, shot_id, character, wav_bytes)
+        return _ok(result)
+    except Exception as exc:
+        logger.exception("audio_import failed")
+        return _err(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Routes — SSE streaming (lipsync / animatic build)
+# ---------------------------------------------------------------------------
+
+
+def _sse_stream(generator_fn, project: str) -> Response:
+    """Wrap a pipeline generator in a Server-Sent Events response."""
+
+    def generate() -> Generator[str, None, None]:
+        # Do NOT yield inside a finally block — Python raises RuntimeError if
+        # GeneratorExit is injected (client disconnect) and a yield occurs in
+        # the finally clause.  Instead, track whether we finished cleanly and
+        # emit the terminal event only when we are not being closed by the GC/WSGI.
+        try:
+            for line in generator_fn(project):
+                yield f"data: {line}\n\n"
+            yield "data: DONE\n\n"
+        except GeneratorExit:
+            # Client disconnected — do not yield; just let the generator close.
+            return
+        except Exception as exc:
+            logger.exception("SSE generator error for project %s", project)
+            yield f"data: ERROR: {exc}\n\n"
+            yield "data: DONE\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.route("/api/lipsync/run")
+def lipsync_run() -> Response | tuple[Response, int]:
+    project = request.args.get("project", "").strip()
+    if not project:
+        return _err("'project' query param is required", 400)
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        return _sse_stream(pipeline_api.run_lipsync, project)
+    except Exception as exc:
+        logger.exception("lipsync_run setup failed")
+        return _err(str(exc))
+
+
+@app.route("/api/animatic/build")
+def animatic_build() -> Response | tuple[Response, int]:
+    project = request.args.get("project", "").strip()
+    if not project:
+        return _err("'project' query param is required", 400)
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        return _sse_stream(pipeline_api.build_animatic, project)
+    except Exception as exc:
+        logger.exception("animatic_build setup failed")
+        return _err(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Routes — file serving
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/animatic/<string:project>")
+def serve_animatic(project: str) -> Response | tuple[Response, int]:
+    try:
+        mp4_path = REPO_ROOT / "outputs" / f"{project}_animatic.mp4"
+        if not mp4_path.exists():
+            return _err(f"Animatic not found for project '{project}'", 404)
+        return send_file(mp4_path, mimetype="video/mp4")
+    except Exception as exc:
+        logger.exception("serve_animatic failed for %s", project)
+        return _err(str(exc))
+
+
+@app.route("/api/storyboards/<string:project>")
+def list_storyboards(project: str) -> Response | tuple[Response, int]:
+    try:
+        storyboard_dir = REPO_ROOT / "outputs" / f"{project}_storyboards"
+        if not storyboard_dir.exists():
+            return _ok([])
+        files = sorted(
+            f.name
+            for f in storyboard_dir.iterdir()
+            if f.suffix.lower() in {".png", ".jpg", ".jpeg"}
+        )
+        return _ok(files)
+    except Exception as exc:
+        logger.exception("list_storyboards failed for %s", project)
+        return _err(str(exc))
+
+
+@app.route("/api/image/<string:project>/<path:filename>")
+def serve_image(project: str, filename: str) -> Response | tuple[Response, int]:
+    try:
+        storyboard_dir = (REPO_ROOT / "outputs" / f"{project}_storyboards").resolve()
+        # Resolve the requested path FIRST so symlinks and `..` components are
+        # expanded before the containment check — prevents path traversal and
+        # sibling-directory bypass via the `startswith` prefix ambiguity.
+        image_path = (storyboard_dir / filename).resolve()
+        # is_relative_to checks path boundaries correctly (Python 3.9+).
+        if not image_path.is_relative_to(storyboard_dir):
+            return _err("Forbidden", 403)
+        if not image_path.exists():
+            return _err(f"Image '{filename}' not found for project '{project}'", 404)
+        return send_file(image_path, max_age=3600)
+    except Exception as exc:
+        logger.exception("serve_image failed for %s/%s", project, filename)
+        return _err(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=False)
