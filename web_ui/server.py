@@ -357,5 +357,5 @@ def serve_image(project: str, filename: str) -> Response | tuple[Response, int]:
 # Entry point
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+if __name__ in ("__main__", "web_ui.server"):
     app.run(host="0.0.0.0", port=5000, debug=False)

@@ -86,4 +86,4 @@ echo "Open your browser at: http://localhost:5000"
 echo "(Press Ctrl+C to stop)"
 echo ""
 
-python3 web_ui/server.py
+python3 -m web_ui.server
