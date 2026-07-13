@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB for audio uploads
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # disable static file caching during development
 
 
 # ---------------------------------------------------------------------------
@@ -40,6 +41,9 @@ def add_cors_headers(response: Response) -> Response:
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    # Prevent browsers from caching JS/CSS so edits are always picked up on reload
+    if response.content_type and any(t in response.content_type for t in ("javascript", "css")):
+        response.headers["Cache-Control"] = "no-store"
     return response
 
 
