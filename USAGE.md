@@ -1,545 +1,343 @@
 # How to Use the App
 
-A complete step-by-step guide to using the AI animation pipeline.
+Complete guide for creating kids animation videos with the web UI and CLI scripts.
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
-1. [Initial Setup](#initial-setup)
-2. [Starting the App](#starting-the-app)
+1. [Starting Everything](#starting-everything)
+2. [Web UI Walkthrough](#web-ui-walkthrough)
 3. [Working with Projects](#working-with-projects)
-4. [Generating Storyboards](#generating-storyboards)
-5. [Generating Voices (TTS)](#generating-voices-tts)
-6. [Generating Lip-Sync](#generating-lip-sync)
-7. [Creating Animatics](#creating-animatics)
-8. [Blender Workflow](#blender-workflow)
-9. [Complete Workflow Example](#complete-workflow-example)
+4. [Generating Lyrics and Music](#generating-lyrics-and-music)
+5. [Generating Storyboards](#generating-storyboards)
+6. [Recording and Importing Audio](#recording-and-importing-audio)
+7. [Generating Lip-Sync](#generating-lip-sync)
+8. [Building the Animatic](#building-the-animatic)
+9. [Blender Workflow](#blender-workflow)
+10. [CLI Reference](#cli-reference)
 
 ---
 
-## Initial Setup
+## Starting Everything
 
-### 1. First-Time Setup
-
-If you haven't set up the environment yet, follow `SETUP.md` first. Key steps:
+### 1. Set GPU power limit (laptops — prevents overheating)
 
 ```bash
-# Verify GPU
-./scripts/check_gpu_docker.sh
-
-# Copy environment file
-cp .env.example .env
-
-# Download a Stable Diffusion model (SD 1.5 recommended for 4GB VRAM)
-# Place it in: models/checkpoints/
+./scripts/setup_gpu.sh
 ```
 
-### 2. Install Python Dependencies
+Run this before every session. It sets your GPU to 75% power cap so ComfyUI doesn't overheat the machine.
 
-```bash
-pip3 install -r requirements.txt
-```
-
----
-
-## Starting the App
-
-### Start Services
+### 2. Start animation services
 
 ```bash
 ./app.sh start
 ```
 
-This will:
-- Check prerequisites
-- Verify GPU access
-- Start ComfyUI, Piper TTS, and Rhubarb containers
-- Show service URLs
+Wait ~60 seconds then check: `./app.sh status`
 
-**Services:**
-- **ComfyUI**: http://localhost:8188 (storyboard generation)
-- **Piper TTS**: http://localhost:10200 (voice generation)
-- **Rhubarb**: CLI container (lip-sync generation)
+Services:
+- ComfyUI → http://localhost:8188
+- Piper TTS → port 10200
+- Rhubarb → CLI container
 
-### Check Status
+### 3. Start the web UI
 
 ```bash
-./app.sh status
+./start_ui.sh
 ```
 
-### View Logs
+Open http://localhost:5000 — this is your main workspace.
 
-```bash
-./app.sh logs
-```
+---
 
-### Stop Services
+## Web UI Walkthrough
 
-```bash
-./app.sh stop
-```
+The dashboard has 5 tabs in the left sidebar:
+
+### Tab 1 — Project
+- Create a new project (name + type: Kids or Story)
+- Select an existing project from the list
+- The selected project carries through to all other tabs
+
+### Tab 2 — Lyrics & Music
+- Enter a **theme** (e.g. "animals at the farm"), **style** (Nursery Rhyme, Pop, Folk, Lullaby), and **number of verses**
+- Click **Generate Lyrics with Claude** → Claude writes a full song with chorus
+- Click **Generate Chord Suggestions** → Claude suggests beginner ukulele/guitar chords
+- Copy the lyrics and chords to use while recording your singing
+
+### Tab 3 — Storyboards
+- Click **Generate Prompts with Claude** → Claude writes a ComfyUI prompt for each shot in your shotlist
+- Open ComfyUI at http://localhost:8188, paste each prompt, and generate the images
+- Save images to `outputs/<project>_storyboards/SH010.png`, `SH020.png`, etc.
+- Click **Refresh Gallery** in the web UI to see generated images
+
+### Tab 4 — Audio
+- Shows a table of all shots in your project
+- For each shot, upload your recorded WAV file (record in Audacity, see [Music](#recording-and-importing-audio))
+- After uploading, click **Run Lip-Sync for All Shots** to generate Rhubarb JSON files
+- Shots show status: "No audio" → "WAV ready" → "Lip-sync ready"
+
+### Tab 5 — Video
+- Click **Build Animatic** to assemble all storyboards + audio into an MP4
+- Watch the live log as it runs
+- Preview the video directly in the browser
+- Download the MP4
 
 ---
 
 ## Working with Projects
 
-### Project Structure
+### Create a project
 
-Each project lives in `projects/<project_name>/`:
+```bash
+# Via web UI: Project tab → enter name → Create Project
+
+# Via CLI:
+python3 scripts/create_project.py --name my_kids_show --type kids
+python3 scripts/create_project.py --name my_story --type story
+```
+
+### Project file structure
 
 ```
-projects/night_shift/
-├── script.md              # Story script
-├── shotlist.csv          # Shot breakdown with durations
-├── dialogue.csv          # Dialogue lines for TTS
-├── styleguide.md         # Visual style guide
+projects/my_kids_show/
+├── script.md              # Your story or song script
+├── shotlist.csv           # One row per shot
+├── dialogue.csv           # Audio lines per shot
+├── styleguide.md          # Visual style for SD prompts
 └── prompts/
-    └── storyboards.md    # ComfyUI prompts per shot
+    └── storyboards.md     # ComfyUI prompts (generated by Claude)
 ```
 
-### Using the Example Project
+### shotlist.csv format
 
-The `night_shift` project is included as an example. You can:
-- Use it as a template
-- Test the pipeline end-to-end
-- Modify it for your own project
+```csv
+shot_id,description,camera,duration,notes
+SH010,Opening title card with show name,Wide,4.0,Title sequence
+SH020,Character singing verse 1,Medium,5.0,Bright meadow background
+SH030,Animals dancing in circle,Wide,4.5,Forest clearing
+```
 
-### Creating a New Project
+### dialogue.csv format
 
-1. **Create project directory:**
-   ```bash
-   mkdir -p projects/my_project/prompts
-   ```
+```csv
+shot_id,character,text,voice_id,language,type
+SH020,Narrator,Old MacDonald had a farm,en_US-lessac-medium,en,song
+SH060,Child,Hello friends welcome to the show,en_US-lessac-medium,en,dialogue
+```
 
-2. **Create required files:**
-   - `script.md` - Your story script
-   - `shotlist.csv` - Shot breakdown (see `projects/night_shift/shotlist.csv` for format)
-   - `dialogue.csv` - Dialogue lines (see `projects/night_shift/dialogue.csv` for format)
-   - `styleguide.md` - Visual style guide
-   - `prompts/storyboards.md` - ComfyUI prompts
+`type` column:
+- `song` — your recorded singing; TTS is always skipped for this type
+- `dialogue` — spoken line; generates TTS unless you have a custom WAV
 
-3. **Shot list CSV format:**
-   ```csv
-   shot_id,description,camera,duration,notes
-   SH010,Establishing shot,Wide,3.0,Exterior
-   SH020,Character enters,Medium,4.0,Interior
-   ```
+### Use the kids template
 
-4. **Dialogue CSV format:**
-   ```csv
-   shot_id,character,text,voice_id,language
-   SH020,Character,Hello world.,en_US-lessac-medium,en
-   ```
+The `projects/kids_template/` directory has a ready-made template with example shots, prompts, and style guide. The `create_project.py` script copies it when you use `--type kids`.
 
 ---
 
-## Generating Storyboards
+## Generating Lyrics and Music
 
-**📖 For detailed ComfyUI configuration, see [COMFYUI_GUIDE.md](COMFYUI_GUIDE.md)**
+### Via web UI (recommended)
 
-### Method 1: Using ComfyUI Web Interface (Recommended)
+1. Select your project
+2. Go to **Lyrics & Music** tab
+3. Fill in theme, style, verses
+4. Click **Generate Lyrics with Claude**
+5. Edit the lyrics if needed
+6. Click **Generate Chord Suggestions**
+7. Copy lyrics and chords to use while recording
 
-1. **Open ComfyUI:**
-   ```
-   http://localhost:8188
-   ```
+### Via Claude directly
 
-2. **Load a prompt:**
-   - Open `projects/night_shift/prompts/storyboards.md`
-   - Copy a prompt (e.g., SH020 prompt)
-
-3. **Configure ComfyUI:**
-   - **Model**: Select SD 1.5 model from dropdown
-   - **Prompt**: Paste the prompt from storyboards.md
-   - **Negative Prompt**: Add "text, captions, logos, watermark"
-   - **Width/Height**: 512x512 (for 4GB VRAM) or 640x360 (16:9)
-   - **Steps**: 20-30
-   - **Sampler**: DPM++ 2M Karras or Euler a
-
-4. **Generate:**
-   - Click "Queue Prompt"
-   - Wait for generation
-   - Save image with shot ID as filename (e.g., `SH020.png`)
-
-5. **Save to outputs:**
-   ```bash
-   mkdir -p outputs/night_shift_storyboards
-   # Move generated images here with shot IDs as filenames
-   ```
-
-### Method 2: Batch Generation (Manual)
-
-1. Generate each shot using ComfyUI
-2. Save images as: `outputs/<project>_storyboards/SH010.png`, `SH020.png`, etc.
-3. Ensure filenames match shot IDs from `shotlist.csv`
-
-### Tips for Storyboards
-
-- **Consistency**: Use the same character descriptions across shots
-- **Resolution**: 512x512 is VRAM-safe for RTX 3050 4GB
-- **Style**: Follow your `styleguide.md` for visual consistency
-- **Naming**: Use exact shot IDs (SH010, SH020, etc.) for automation
+You can also paste your script into claude.ai and ask:
+- "Write a 3-verse kids song about [topic] in a nursery rhyme style"
+- "Suggest simple ukulele chords for these lyrics: [paste lyrics]"
 
 ---
 
-## Generating Voices (TTS)
+## Recording and Importing Audio
 
-### Prerequisites
+You record your own singing and narration. See [MUSIC_TOOLS.md](MUSIC_TOOLS.md) for full software guide.
 
-- **Services running**: `./app.sh start` (Piper container must be running)
-- **Host Python setup**: Install Python dependencies on your host machine
-  ```bash
-  # One-time setup (if not already done)
-  ./scripts/setup_host.sh
-  ```
-  This creates a Python virtual environment (`.venv/`) and installs dependencies.
-- **dialogue.csv** file in your project directory
+### Recommended workflow
 
-### Generate Voices
+1. **Compose music in LMMS** (`sudo apt install lmms`):
+   - Create a simple backing track (bass, melody, rhythm)
+   - File → Export → As WAV
 
-**Run from your host machine (not inside Docker):**
+2. **Record singing in Audacity** (`sudo apt install audacity`):
+   - File → Import → Audio (import your LMMS backing track as guide)
+   - Record your vocals on a new track
+   - Effect → Noise Reduction (clean up background noise)
+   - Effect → Normalize (consistent volume)
+   - File → Export → Export as WAV (16-bit, 44100 Hz)
 
-**Option 1: Using helper script (recommended)**
+3. **Import into the pipeline**:
+
+Via web UI: Audio tab → upload file for the shot → status turns green
+
+Via CLI:
 ```bash
-./run_script.sh python3 scripts/gen_tts.py --project night_shift
+# Check what's missing
+python3 scripts/import_audio.py --project my_kids_show --list
+
+# Import one file
+python3 scripts/import_audio.py \
+  --project my_kids_show \
+  --shot SH020 \
+  --character Narrator \
+  --audio ~/recordings/verse1.wav \
+  --lipsync    # generates lip-sync JSON immediately
 ```
 
-**Option 2: Manual activation**
-```bash
-source .venv/bin/activate
-python3 scripts/gen_tts.py --project night_shift
-deactivate
+Files are saved to:
+```
+voices/my_kids_show/
+├── SH020_Narrator.wav
+├── SH020_Narrator.json   # lip-sync data (if --lipsync was used)
 ```
 
-**Note:** This script runs on your host and uses `docker exec` to call the Piper container.
+### Using TTS instead of recording (dialogue lines only)
 
-This will:
-- Read `projects/night_shift/dialogue.csv`
-- Generate WAV files for each dialogue line
-- Save to `voices/night_shift/SH020_Character.wav`
-
-### Output Structure
-
-```
-voices/night_shift/
-├── SH050_Operator.wav
-└── SH100_Operator.wav
-```
-
-### Regenerate (Force)
+For non-song dialogue, Piper TTS can generate the voice automatically:
 
 ```bash
-python3 scripts/gen_tts.py --project night_shift --force
+python3 scripts/gen_tts.py --project my_kids_show
 ```
 
-### Troubleshooting TTS
-
-- **Service not running**: `./app.sh start`
-- **Port conflict**: Check if Piper is accessible: `curl http://localhost:10200`
-- **Voice model not found**: Check available voices in Piper container
+- Lines with `type=song` are always skipped
+- Lines with `type=dialogue` where a WAV already exists are also skipped
+- Use `--force` to regenerate TTS even if WAV exists
 
 ---
 
 ## Generating Lip-Sync
 
-### Prerequisites
+Lip-sync creates a JSON file mapping phonemes to time codes, used in Blender for mouth movement.
 
-- TTS WAV files generated (from previous step)
-- **Services running**: `./app.sh start` (Rhubarb container must be running)
-- **Host Python setup**: Same as TTS (pip3 and requirements.txt)
+### Via web UI
 
-### Generate Lip-Sync Data
+Audio tab → **Run Lip-Sync for All Shots** — runs after you've uploaded WAV files.
 
-**Run from your host machine (not inside Docker):**
-
-**Option 1: Using helper script (recommended)**
-```bash
-./run_script.sh python3 scripts/gen_lipsync.py --project night_shift
-```
-
-**Option 2: Manual activation**
-```bash
-source .venv/bin/activate
-python3 scripts/gen_lipsync.py --project night_shift
-deactivate
-```
-
-**Note:** This script runs on your host and uses `docker exec` to call the Rhubarb container.
-
-This will:
-- Find all WAV files in `voices/night_shift/`
-- Generate JSON phoneme files using Rhubarb
-- Save alongside WAV files
-
-### Output Structure
-
-```
-voices/night_shift/
-├── SH050_Operator.wav
-├── SH050_Operator.json    # Lip-sync phoneme data
-├── SH100_Operator.wav
-└── SH100_Operator.json
-```
-
-### Using in Blender
-
-The JSON files contain phoneme timing data that can be:
-- Imported into Blender
-- Applied to shape keys for lip-sync animation
-- Used with addons like "Rhubarb Lip Sync" for Blender
-
-### Regenerate (Force)
+### Via CLI
 
 ```bash
-python3 scripts/gen_lipsync.py --project night_shift --force
+python3 scripts/gen_lipsync.py --project my_kids_show
+python3 scripts/gen_lipsync.py --project my_kids_show --force  # regenerate
+```
+
+Output:
+```
+voices/my_kids_show/
+├── SH020_Narrator.wav
+└── SH020_Narrator.json   ← phoneme timing data for Blender
 ```
 
 ---
 
-## Creating Animatics
+## Generating Storyboards
 
-### Prerequisites
+### Via web UI (prompts only — images still need ComfyUI)
 
-- Storyboard images in `outputs/<project>_storyboards/`
-- Optional: TTS audio files in `voices/<project>/`
-- **FFmpeg installed on host**: `sudo apt install ffmpeg`
-- **Host Python setup**: Same as TTS (pip3 and requirements.txt)
+1. Select your project
+2. Go to **Storyboards** tab
+3. Click **Generate Prompts with Claude** — writes a ComfyUI prompt for each shot
+4. Prompts are saved to `projects/<project>/prompts/storyboards.md`
 
-### Generate Animatic
+### In ComfyUI
 
-**Run from your host machine (not inside Docker):**
+1. Open http://localhost:8188
+2. For each shot, copy the prompt from storyboards.md
+3. Set:
+   - Model: SD 1.5 (v1-5-pruned-emaonly.safetensors)
+   - Width × Height: 512×512 (safe for 4GB VRAM)
+   - Steps: 15–20
+   - CFG Scale: 7
+   - Batch size: 1
+4. Generate and save the image as `SH010.png`, `SH020.png`, etc.
 
-**Option 1: Using helper script (recommended)**
+### Save storyboard images
+
 ```bash
-./run_script.sh python3 scripts/make_dailies.py --project night_shift
+mkdir -p outputs/my_kids_show_storyboards/
+# Move generated images here with shot IDs as filenames
+# e.g. outputs/my_kids_show_storyboards/SH020.png
 ```
 
-**Option 2: Manual activation**
+### Tips
+
+- Keep the same character description across all shots for visual consistency
+- Use the style guide keywords from your `styleguide.md` at the start of every prompt
+- Kids style prefix: `cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines`
+
+---
+
+## Building the Animatic
+
+### Via web UI
+
+Video tab → **Build Animatic** → watch live log → preview video in browser.
+
+### Via CLI
+
 ```bash
-source .venv/bin/activate
-python3 scripts/make_dailies.py --project night_shift
-deactivate
+python3 scripts/make_dailies.py --project my_kids_show
+# → outputs/my_kids_show_animatic.mp4
 ```
 
-**Note:** This script runs entirely on your host using FFmpeg (no Docker containers needed).
-
-This will:
-- Read `shotlist.csv` for shot order and durations
-- Assemble storyboard images in sequence
-- Mix in dialogue audio if available
-- Create `outputs/night_shift_animatic.mp4`
-
-### Output
-
-```
-outputs/
-└── night_shift_animatic.mp4
-```
-
-### How It Works
-
-1. Reads `shotlist.csv` to get shot order
-2. Finds storyboard images matching shot IDs
-3. Uses shot durations from CSV
-4. Mixes in dialogue audio if WAV files exist
-5. Creates 24fps MP4 video
-
-### Customization
-
-Edit `scripts/make_dailies.py` to adjust:
-- Frame rate (default: 24fps)
-- Video codec settings
-- Audio mixing behavior
+Requires:
+- `ffmpeg` installed: `sudo apt install ffmpeg`
+- Storyboard images in `outputs/my_kids_show_storyboards/`
+- Shot durations in `shotlist.csv`
+- Audio (optional but recommended) in `voices/my_kids_show/`
 
 ---
 
 ## Blender Workflow
 
-### 1. Import Assets
+Use Blender for full animation (beyond the animatic). The animatic is your timing reference.
 
-- **Storyboards**: Reference for camera angles and composition
-- **Audio**: Import WAV files for dialogue
-- **Lip-sync JSON**: Import phoneme data
-
-### 2. Setup Scene
-
-- **Frame Rate**: 24 fps
-- **Resolution**: Match your target (e.g., 1280x720)
-- **Render Engine**: Eevee (fast iteration) or Cycles (quality)
-
-### 3. Apply Lip-Sync
-
-1. Import Rhubarb JSON data
-2. Create viseme shape keys on character
-3. Map phonemes to shape keys
-4. Animate based on JSON timing
-
-### 4. Animate
-
-- Use storyboards as reference
-- Follow shot durations from `shotlist.csv`
-- Sync animation to imported audio
-
-### 5. Render
-
-- Render per shot: `renders/<project>/<shot_id>/v001/%04d.png`
-- Use consistent naming for assembly
-
-### 6. Final Assembly
-
-Use FFmpeg or video editor to:
-- Assemble rendered shots
-- Add final audio mix
-- Add transitions/effects
+1. **Open Blender** on the host (not in Docker)
+2. **Import assets**:
+   - Storyboard PNGs as reference images
+   - WAV files: File → Import → Sound
+   - Lip-sync JSON: use the Rhubarb Blender add-on
+3. **Setup**:
+   - Frame rate: 24 fps
+   - Resolution: 1280×720 or 1920×1080
+   - Render engine: Eevee (fast) or Cycles (quality)
+4. **Animate**: use storyboards as reference, match timing to `shotlist.csv` durations
+5. **Render**: `renders/<project>/<shot_id>/v001/%04d.png`
+6. **Assemble**: combine rendered shots with FFmpeg or Kdenlive
 
 ---
 
-## Complete Workflow Example
-
-Here's a complete workflow using the `night_shift` example:
-
-### Step 1: Start Services
+## CLI Reference
 
 ```bash
-./app.sh start
-```
+# Service management
+./app.sh start / stop / restart / status / logs
 
-Wait for services to be healthy: `./app.sh status`
+# GPU (laptops — run before starting services)
+./scripts/setup_gpu.sh
 
-### Step 2: Generate Storyboards
+# Project management
+python3 scripts/create_project.py --name <name> --type kids|story
 
-1. Open http://localhost:8188
-2. Load SD 1.5 model
-3. For each shot in `projects/night_shift/prompts/storyboards.md`:
-   - Copy prompt
-   - Generate in ComfyUI
-   - Save as `outputs/night_shift_storyboards/SH010.png`, etc.
+# Audio
+python3 scripts/import_audio.py --project <name> --list
+python3 scripts/import_audio.py --project <name> --shot <id> --character <name> --audio <file.wav> [--lipsync]
+python3 scripts/gen_tts.py --project <name> [--force]
+python3 scripts/gen_lipsync.py --project <name> [--force]
 
-### Step 3: Generate Voices
+# Video
+python3 scripts/make_dailies.py --project <name>
 
-```bash
-python3 scripts/gen_tts.py --project night_shift
-```
-
-Check output: `ls voices/night_shift/`
-
-### Step 4: Generate Lip-Sync
-
-```bash
-python3 scripts/gen_lipsync.py --project night_shift
-```
-
-Check output: `ls voices/night_shift/*.json`
-
-### Step 5: Create Animatic
-
-```bash
-python3 scripts/make_dailies.py --project night_shift
-```
-
-View: `outputs/night_shift_animatic.mp4`
-
-### Step 6: Animate in Blender
-
-1. Open Blender
-2. Import storyboards as reference
-3. Import WAV files for audio
-4. Import JSON files for lip-sync
-5. Animate and render
-
-### Step 7: Final Assembly
-
-Assemble rendered shots with audio in your video editor.
-
----
-
-## Common Commands Reference
-
-```bash
-# Service Management
-./app.sh start          # Start all services
-./app.sh stop           # Stop all services
-./app.sh restart        # Restart services
-./app.sh status         # Check service status
-./app.sh logs           # View logs
-
-# GPU Validation
+# Diagnostics
 ./scripts/check_gpu_docker.sh
-
-# Project Workflow
-python3 scripts/gen_tts.py --project <name>           # Generate voices
-python3 scripts/gen_lipsync.py --project <name>        # Generate lip-sync
-python3 scripts/make_dailies.py --project <name>       # Create animatic
-
-# Docker Commands (if needed)
-docker compose ps                    # Service status
-docker compose logs comfyui          # ComfyUI logs
-docker exec -it comfyui nvidia-smi   # Check GPU in container
+nvidia-smi
+watch -n 2 nvidia-smi      # monitor GPU during generation
 ```
-
----
-
-## Tips & Best Practices
-
-### Storyboards
-- Generate in batches (5-10 shots at a time)
-- Keep prompts consistent for character/environment
-- Use negative prompts to avoid unwanted elements
-
-### TTS
-- Keep dialogue lines under 2.5 seconds
-- Test voice models before batch generation
-- Use `--force` to regenerate if needed
-
-### Lip-Sync
-- Ensure WAV files are clear and well-paced
-- Check JSON output for timing accuracy
-- Test in Blender before full production
-
-### Animatics
-- Review animatic before starting animation
-- Adjust shot durations in `shotlist.csv` if needed
-- Use animatic as timing reference in Blender
-
-### Performance
-- **4GB VRAM**: Use SD 1.5, 512x512 resolution
-- **8GB+ VRAM**: Can use SDXL, higher resolutions
-- Monitor GPU usage: `watch -n 1 nvidia-smi`
-
----
-
-## Troubleshooting
-
-### ComfyUI Not Loading
-- Check logs: `./app.sh logs`
-- Verify GPU: `docker exec -it comfyui nvidia-smi`
-- Check port: `curl http://localhost:8188`
-
-### TTS Not Working
-- Verify Piper is running: `./app.sh status`
-- Check port: `curl http://localhost:10200`
-- Review logs: `docker compose logs piper`
-
-### Lip-Sync Fails
-- Ensure Rhubarb container is running
-- Check WAV file exists and is valid
-- Verify container: `docker exec -it rhubarb rhubarb --version`
-
-### Animatic Missing Shots
-- Verify storyboard images exist with correct filenames
-- Check `shotlist.csv` has all shot IDs
-- Ensure image filenames match shot IDs exactly
-
----
-
-## Next Steps
-
-1. **Create your own project** in `projects/`
-2. **Experiment with prompts** in ComfyUI
-3. **Test different voice models** in Piper
-4. **Build your animation** in Blender
-5. **Iterate and refine** your workflow
-
-For detailed setup instructions, see `SETUP.md`.  
-For architecture overview, see `README.md`.
