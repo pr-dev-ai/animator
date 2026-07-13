@@ -13,6 +13,14 @@ logger = logging.getLogger(__name__)
 _client = None
 
 
+def _extract_text(response) -> str:
+    """Return the text content from a Claude response, skipping ThinkingBlocks."""
+    for block in response.content:
+        if hasattr(block, "text"):
+            return block.text
+    raise ValueError("No text block found in Claude response")
+
+
 def _strip_fences(text: str) -> str:
     """Remove markdown code fences that Claude sometimes wraps around JSON."""
     stripped = text.strip()
@@ -72,7 +80,7 @@ def generate_lyrics(theme: str, style: str, num_verses: int) -> dict:
     except Exception as exc:
         raise RuntimeError(f"Claude API call failed in generate_lyrics: {exc}") from exc
 
-    raw_text = response.content[0].text
+    raw_text = _extract_text(response)
     logger.debug("generate_lyrics raw response: %s", raw_text)
 
     try:
@@ -118,7 +126,7 @@ def generate_chords(lyrics_text: str) -> dict:
     except Exception as exc:
         raise RuntimeError(f"Claude API call failed in generate_chords: {exc}") from exc
 
-    raw_text = response.content[0].text
+    raw_text = _extract_text(response)
     logger.debug("generate_chords raw response: %s", raw_text)
 
     try:
@@ -188,7 +196,7 @@ def generate_storyboard_prompts(
             f"Claude API call failed in generate_storyboard_prompts: {exc}"
         ) from exc
 
-    raw_text = response.content[0].text
+    raw_text = _extract_text(response)
     logger.debug("generate_storyboard_prompts raw response: %s", raw_text)
 
     try:
