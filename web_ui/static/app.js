@@ -233,6 +233,10 @@ function setProject(name) {
     hintSpan.textContent = `Project "${name}" selected. Click a tab in the sidebar to continue.`;
   }
 
+  // Clear the "requires a project" note on the Storyboard tab
+  const promptsNote = document.getElementById('prompts-project-note');
+  if (promptsNote) promptsNote.textContent = '';
+
   toast(`Project "${name}" selected`, 'success');
   saveState();
 }
