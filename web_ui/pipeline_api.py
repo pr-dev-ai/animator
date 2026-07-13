@@ -198,28 +198,39 @@ def import_audio(project: str, shot_id: str, character: str, wav_bytes: bytes) -
 def _find_checkpoint() -> str:
     """Return the best available checkpoint name known to ComfyUI.
 
-    Prefers .safetensors over .ckpt. Falls back to scanning the local
-    models/checkpoints directory if ComfyUI is not yet responding.
-    Raises ValueError if no model is found.
+    Prefers .safetensors over .ckpt but skips zero-byte (corrupt/incomplete)
+    files. Falls back to scanning the local models/checkpoints directory if
+    ComfyUI is not yet responding.
+    Raises ValueError if no usable model is found.
     """
+    checkpoints_dir = REPO_ROOT / "models" / "checkpoints"
+
+    def _is_valid(name: str) -> bool:
+        """True if the file exists on the host volume and is non-empty."""
+        p = checkpoints_dir / name
+        try:
+            return p.stat().st_size > 0
+        except OSError:
+            return True  # can't check from host — assume OK
+
     try:
         with urllib.request.urlopen(
             f"{COMFYUI_URL}/object_info/CheckpointLoaderSimple", timeout=4
         ) as resp:
             data = json.loads(resp.read())
             models: list[str] = data["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
-            if models:
-                safetensors = [m for m in models if m.endswith(".safetensors")]
-                return safetensors[0] if safetensors else models[0]
+            valid = [m for m in models if _is_valid(m)]
+            if valid:
+                safetensors = [m for m in valid if m.endswith(".safetensors")]
+                return safetensors[0] if safetensors else valid[0]
     except Exception:
         pass
 
-    checkpoints_dir = REPO_ROOT / "models" / "checkpoints"
     if checkpoints_dir.exists():
-        st = sorted(checkpoints_dir.glob("*.safetensors"))
+        st = [p for p in sorted(checkpoints_dir.glob("*.safetensors")) if p.stat().st_size > 0]
         if st:
             return st[0].name
-        ckpts = sorted(checkpoints_dir.glob("*.ckpt"))
+        ckpts = [p for p in sorted(checkpoints_dir.glob("*.ckpt")) if p.stat().st_size > 0]
         if ckpts:
             return ckpts[0].name
 
