@@ -388,7 +388,9 @@ async function generatePrompts() {
 
   setLoading(btn, true, 'Generating prompts...');
   try {
-    const data = await api('POST', '/api/generate/prompts', { project: state.project, style });
+    // Include current lyrics so Claude can write scene-specific prompts
+    const lyricsNow = document.getElementById('lyrics-textarea')?.value.trim() || state.lyrics || '';
+    const data = await api('POST', '/api/generate/prompts', { project: state.project, style, lyrics: lyricsNow });
     state.prompts = data.data || [];
 
     // CSS hides #prompts-list with display:none
@@ -746,11 +748,18 @@ async function restoreSession() {
     loadGallery();
   }
 
-  // Restore lyrics
-  if (saved.lyrics) {
-    state.lyrics = saved.lyrics;
+  // Restore lyrics — prefer localStorage, fall back to disk
+  let restoredLyrics = saved.lyrics || null;
+  if (!restoredLyrics && saved.project) {
+    try {
+      const ld = await api('GET', `/api/lyrics/${encodeURIComponent(saved.project)}`);
+      if (ld.data) restoredLyrics = ld.data;
+    } catch (_) {}
+  }
+  if (restoredLyrics) {
+    state.lyrics = restoredLyrics;
     const textarea = document.getElementById('lyrics-textarea');
-    if (textarea) textarea.value = saved.lyrics;
+    if (textarea) textarea.value = restoredLyrics;
     show('lyrics-result');
     show('chords-section');
   }

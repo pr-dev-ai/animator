@@ -227,6 +227,7 @@ def generate_prompts() -> Response | tuple[Response, int]:
         body = request.get_json(force=True) or {}
         project: str = body.get("project", "").strip()
         style: str = body.get("style", "")
+        lyrics: str = body.get("lyrics", "").strip()
 
         # Validate before touching Claude
         if not project:
@@ -252,7 +253,14 @@ def generate_prompts() -> Response | tuple[Response, int]:
         elif style:
             style_guide = style
 
-        prompts = claude_api.generate_storyboard_prompts(project, shots, style_guide)
+        # Save lyrics to disk so they persist across server restarts
+        if lyrics:
+            lyrics_path = project_dir / "lyrics.txt"
+            lyrics_path.write_text(lyrics, encoding="utf-8")
+        elif (project_dir / "lyrics.txt").exists():
+            lyrics = (project_dir / "lyrics.txt").read_text(encoding="utf-8").strip()
+
+        prompts = claude_api.generate_storyboard_prompts(project, shots, style_guide, lyrics)
         pipeline_api.save_storyboard_prompts(project, prompts)
         return _ok(prompts)
     except ValueError as exc:
@@ -324,6 +332,19 @@ def _sse_stream(generator_fn, project: str) -> Response:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.route("/api/lyrics/<string:project>")
+def load_lyrics(project: str) -> Response | tuple[Response, int]:
+    """Return previously saved lyrics for a project (no Claude call)."""
+    try:
+        lyrics_file = REPO_ROOT / "projects" / project / "lyrics.txt"
+        if not lyrics_file.exists():
+            return _ok(None)
+        return _ok(lyrics_file.read_text(encoding="utf-8").strip())
+    except Exception as exc:
+        logger.exception("load_lyrics failed for %s", project)
+        return _err(str(exc))
 
 
 @app.route("/api/prompts/<string:project>")

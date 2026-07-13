@@ -171,7 +171,7 @@ def generate_chords(lyrics_text: str) -> dict:
 
 
 def generate_storyboard_prompts(
-    project_name: str, shotlist: list, style_guide: str
+    project_name: str, shotlist: list, style_guide: str, lyrics: str = ""
 ) -> list:
     """Generate Stable Diffusion image prompts for each shot in a storyboard.
 
@@ -180,6 +180,7 @@ def generate_storyboard_prompts(
         shotlist: List of dicts, each with keys:
             shot_id (str), description (str), camera (str), duration (float).
         style_guide: High-level visual style description for the project.
+        lyrics: Full song lyrics to ground each scene in the song content.
 
     Returns:
         List of dicts, each with keys:
@@ -209,15 +210,21 @@ def generate_storyboard_prompts(
 
     system_prompt = (
         "You are a storyboard artist creating image prompts for a children's animated show. "
-        "Each prompt must be safe, age-appropriate, and visually descriptive for Stable Diffusion."
+        "Each prompt must be safe, age-appropriate, and visually descriptive for Stable Diffusion. "
+        "When song lyrics are provided, make each scene reflect the specific lyric content "
+        "happening at that moment in the song."
     )
 
     shotlist_text = json.dumps(shotlist, indent=2)
+    lyrics_section = f"\nSong lyrics (use these to make each scene match the song):\n{lyrics.strip()}\n" if lyrics.strip() else ""
     user_prompt = (
         f'Project: "{project_name}"\n'
-        f"Style guide: {style_guide}\n\n"
+        f"Style guide: {style_guide}\n"
+        f"{lyrics_section}\n"
         "For each shot below, write a Stable Diffusion prompt that begins with:\n"
         f'"{sd_prefix}"\n\n'
+        "The scene description must be specific to the lyrics/song content for that moment — "
+        "not generic. Describe what characters are doing, what words/actions match the lyric line.\n\n"
         "Return a JSON array where each element has keys:\n"
         '  "shot_id" (string, matching the input),\n'
         '  "prompt" (string, the full SD prompt),\n'
