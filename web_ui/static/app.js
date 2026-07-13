@@ -169,12 +169,19 @@ async function loadProjectList() {
     const listEl = document.getElementById('project-list');
     if (listEl) {
       listEl.innerHTML = '';
-      projects.forEach(name => {
+      if (projects.length === 0) {
         const li = document.createElement('li');
-        li.textContent = name;
-        li.addEventListener('click', () => setProject(name));
+        li.className = 'projects-empty';
+        li.textContent = 'No projects yet. Create one above to get started.';
         listEl.appendChild(li);
-      });
+      } else {
+        projects.forEach(name => {
+          const li = document.createElement('li');
+          li.textContent = name;
+          li.addEventListener('click', () => setProject(name));
+          listEl.appendChild(li);
+        });
+      }
     }
 
     // Populate header dropdown

@@ -595,6 +595,27 @@ input[type="file"]::-webkit-file-upload-button {
   font-style: italic;
 }
 
+.project-list-items {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.project-list-items li:not(.projects-empty) {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color var(--transition), background-color var(--transition);
+  color: var(--text-primary);
+}
+
+.project-list-items li:not(.projects-empty):hover {
+  border-color: var(--accent);
+  background-color: rgba(233, 69, 96, 0.06);
+}
+
 .project-item {
   display: flex;
   align-items: center;
