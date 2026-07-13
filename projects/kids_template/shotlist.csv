@@ -1,0 +1,14 @@
+shot_id,description,camera,duration,notes
+SH010,Opening title card over bright sunny meadow,Wide,4.0,Song section start; add your title here
+SH020,Bunny character singing verse 1,Medium,5.0,Song verse 1; custom WAV audio required
+SH030,Duck character singing verse 2,Medium,5.0,Song verse 2; custom WAV audio required
+SH040,All animals dancing together from above,Wide,4.0,No dialogue; movement beat; overhead/top-down angle
+SH050,Cat character singing verse 3,Medium,5.0,Song verse 3; custom WAV audio required
+SH060,Dog character singing verse 4,Medium,5.0,Song verse 4; custom WAV audio required
+SH070,All animals lined up clapping and swaying,Wide,4.0,Chorus reprise; no new dialogue
+SH080,Animals wave goodbye; slow pull back,Wide,4.0,Song section end; fade out
+SH100,Establishing shot of colourful park,Wide,4.0,Story section start
+SH110,MainCharacter enters and greets friends,Medium,3.0,First dialogue line
+SH120,MainCharacter's excited close-up reaction,Close-up,3.0,Reaction shot; replace text in script
+SH130,MainCharacter and Friend together,Medium,5.0,Two-character shot; second dialogue line
+SH140,Both characters run toward horizon,Wide,4.0,Story end; hold on happy scene

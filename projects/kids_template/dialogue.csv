@@ -1,0 +1,9 @@
+shot_id,character,text,voice_id,language,type
+SH020,Narrator,Verse 1 of your song here,en_US-lessac-medium,en,song
+SH030,Narrator,Verse 2 of your song here,en_US-lessac-medium,en,song
+SH050,Narrator,Verse 3 of your song here,en_US-lessac-medium,en,song
+SH060,Narrator,Verse 4 of your song here,en_US-lessac-medium,en,song
+SH110,MainCharacter,Hello friends!,en_US-lessac-medium,en,dialogue
+SH120,MainCharacter,"Wow, look at that!",en_US-lessac-medium,en,dialogue
+SH130,Friend,Let's go find out!,en_US-lessac-medium,en,dialogue
+SH140,Narrator,[replace with your closing line],en_US-lessac-medium,en,dialogue

@@ -117,9 +117,15 @@ def process_dialogue_csv(project_name: str, force: bool = False):
             text = row.get("text", "").strip()
             voice_id = row.get("voice_id", "en_US-lessac-medium").strip()
             language = row.get("language", "en").strip()
+            row_type = row.get("type", "dialogue").strip()
 
             if not shot_id or not text:
                 logger.warning(f"Skipping row with missing shot_id or text")
+                continue
+
+            if row_type == "song":
+                logger.info(f"Skipping {shot_id} (type=song — provide a custom WAV file instead)")
+                skipped += 1
                 continue
 
             output_filename = f"{shot_id}_{character}.wav"
