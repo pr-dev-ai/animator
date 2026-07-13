@@ -382,6 +382,49 @@ async function generatePrompts() {
   }
 }
 
+async function generateImages() {
+  if (!await preflight(true)) return;
+
+  const logEl = document.getElementById('generate-images-log');
+  const btn = document.getElementById('generate-images-btn');
+  if (!logEl) return;
+
+  logEl.classList.add('visible');
+  logEl.textContent = '';
+  setLoading(btn, true, 'Generating images...');
+
+  const source = new EventSource(
+    `/api/storyboards/generate?project=${encodeURIComponent(state.project)}`
+  );
+  let streamDone = false;
+
+  source.onmessage = event => {
+    const line = event.data;
+    if (line === 'DONE') {
+      streamDone = true;
+      source.close();
+      setLoading(btn, false);
+      toast('All images generated!', 'success');
+      loadGallery();
+    } else if (line.startsWith('ERROR:')) {
+      streamDone = true;
+      source.close();
+      setLoading(btn, false);
+      toast(line, 'error');
+      appendLog(logEl, line);
+    } else {
+      appendLog(logEl, line);
+    }
+  };
+
+  source.onerror = () => {
+    if (streamDone) return;
+    source.close();
+    setLoading(btn, false);
+    toast('Image generation stream disconnected', 'error');
+  };
+}
+
 async function loadGallery() {
   if (!state.project) return;
 
@@ -653,6 +696,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('generate-lyrics-btn')?.addEventListener('click', generateLyrics);
   document.getElementById('generate-chords-btn')?.addEventListener('click', generateChords);
   document.getElementById('generate-prompts-btn')?.addEventListener('click', generatePrompts);
+  document.getElementById('generate-images-btn')?.addEventListener('click', generateImages);
   document.getElementById('refresh-gallery-btn')?.addEventListener('click', loadGallery);
   document.getElementById('refresh-shots-btn')?.addEventListener('click', loadShotTable);
   document.getElementById('run-lipsync-btn')?.addEventListener('click', runLipsync);

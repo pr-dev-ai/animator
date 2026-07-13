@@ -348,18 +348,31 @@
           <div id="prompts-list" aria-live="polite"></div>
         </div>
 
-        <div class="divider-label">Open ComfyUI to generate your images:</div>
+        <div class="divider-label">Generate images via ComfyUI API or open manually:</div>
 
-        <div class="btn-row mb-3">
+        <div class="btn-row mb-2">
+          <button type="button"
+                  id="generate-images-btn"
+                  class="btn btn-accent">
+            <span class="btn-spinner" aria-hidden="true"></span>
+            <span class="btn-icon" aria-hidden="true">🎨</span>
+            Generate All Images
+          </button>
           <a href="http://localhost:8188"
              target="_blank"
              rel="noopener noreferrer"
-             class="btn btn-accent"
-             aria-label="Open ComfyUI image generator in a new tab">
+             class="btn btn-secondary"
+             aria-label="Open ComfyUI manually in a new tab">
             <span aria-hidden="true">🖥️</span>
             Open ComfyUI →
           </a>
         </div>
+
+        <pre id="generate-images-log"
+             class="log-panel"
+             role="log"
+             aria-label="Image generation log"
+             aria-live="polite"></pre>
 
         <div class="card">
           <div class="card-title">

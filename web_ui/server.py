@@ -325,6 +325,26 @@ def _sse_stream(generator_fn, project: str) -> Response:
     )
 
 
+@app.route("/api/storyboards/generate")
+def storyboards_generate() -> Response | tuple[Response, int]:
+    project = request.args.get("project", "").strip()
+    if not project:
+        return _err("'project' query param is required", 400)
+    project_dir = REPO_ROOT / "projects" / project
+    if not project_dir.is_dir():
+        return _err(f"Project '{project}' not found", 404)
+    prompts_file = project_dir / "prompts" / "storyboards.json"
+    if not prompts_file.exists():
+        return _err("No prompts found — generate prompts first", 400)
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        return _sse_stream(pipeline_api.generate_storyboard_images, project)
+    except Exception as exc:
+        logger.exception("storyboards_generate failed")
+        return _err(str(exc))
+
+
 @app.route("/api/lipsync/run")
 def lipsync_run() -> Response | tuple[Response, int]:
     project = request.args.get("project", "").strip()

@@ -5,14 +5,21 @@ so the Flask server can call them without reimplementing their logic.
 
 import csv
 import glob
+import json
 import logging
+import random
 import re
 import subprocess
 import sys
+import time
+import uuid
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Generator, Optional
+
+COMFYUI_URL = "http://localhost:8188"
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -188,6 +195,66 @@ def import_audio(project: str, shot_id: str, character: str, wav_bytes: bytes) -
     return {"path": str(relative_path)}
 
 
+def _find_checkpoint() -> str:
+    """Return the best available checkpoint name known to ComfyUI.
+
+    Prefers .safetensors over .ckpt. Falls back to scanning the local
+    models/checkpoints directory if ComfyUI is not yet responding.
+    Raises ValueError if no model is found.
+    """
+    try:
+        with urllib.request.urlopen(
+            f"{COMFYUI_URL}/object_info/CheckpointLoaderSimple", timeout=4
+        ) as resp:
+            data = json.loads(resp.read())
+            models: list[str] = data["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
+            if models:
+                safetensors = [m for m in models if m.endswith(".safetensors")]
+                return safetensors[0] if safetensors else models[0]
+    except Exception:
+        pass
+
+    checkpoints_dir = REPO_ROOT / "models" / "checkpoints"
+    if checkpoints_dir.exists():
+        st = sorted(checkpoints_dir.glob("*.safetensors"))
+        if st:
+            return st[0].name
+        ckpts = sorted(checkpoints_dir.glob("*.ckpt"))
+        if ckpts:
+            return ckpts[0].name
+
+    raise ValueError(
+        "No checkpoint model found in models/checkpoints/. "
+        "Download a Stable Diffusion model (e.g. v1-5-pruned-emaonly.safetensors) first."
+    )
+
+
+def _comfyui_workflow(prompt: str, negative: str, shot_id: str, checkpoint: str) -> dict:
+    """Minimal SD 1.5 text-to-image workflow for the ComfyUI API."""
+    return {
+        "1": {"class_type": "CheckpointLoaderSimple",
+              "inputs": {"ckpt_name": checkpoint}},
+        "2": {"class_type": "CLIPTextEncode",
+              "inputs": {"clip": ["1", 1], "text": prompt}},
+        "3": {"class_type": "CLIPTextEncode",
+              "inputs": {"clip": ["1", 1], "text": negative}},
+        "4": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": 512, "height": 512, "batch_size": 1}},
+        "5": {"class_type": "KSampler",
+              "inputs": {
+                  "model": ["1", 0], "positive": ["2", 0], "negative": ["3", 0],
+                  "latent_image": ["4", 0],
+                  "seed": random.randint(0, 2 ** 32 - 1),
+                  "steps": 15, "cfg": 7.0,
+                  "sampler_name": "euler", "scheduler": "normal", "denoise": 1.0,
+              }},
+        "6": {"class_type": "VAEDecode",
+              "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
+        "7": {"class_type": "SaveImage",
+              "inputs": {"images": ["6", 0], "filename_prefix": shot_id}},
+    }
+
+
 def save_storyboard_prompts(project: str, prompts: list[dict]) -> None:
     """Writes prompts to projects/<project>/prompts/storyboards.md.
 
@@ -217,6 +284,12 @@ def save_storyboard_prompts(project: str, prompts: list[dict]) -> None:
     tmp_md = storyboards_md.with_suffix(".md.tmp")
     tmp_md.write_text("\n".join(lines), encoding="utf-8")
     tmp_md.replace(storyboards_md)
+
+    # JSON sidecar — used by generate_storyboard_images for machine-readable access.
+    storyboards_json = prompts_dir / "storyboards.json"
+    tmp_json = storyboards_json.with_suffix(".json.tmp")
+    tmp_json.write_text(json.dumps(prompts, indent=2), encoding="utf-8")
+    tmp_json.replace(storyboards_json)
     logger.info("Saved storyboard prompts: %s", storyboards_md)
 
 
@@ -317,6 +390,119 @@ def get_animatic_path(project: str) -> Optional[Path]:
     """Returns the Path to outputs/<project>_animatic.mp4, or None if missing."""
     animatic = REPO_ROOT / "outputs" / f"{project}_animatic.mp4"
     return animatic if animatic.exists() else None
+
+
+def generate_storyboard_images(project: str) -> Generator[str, None, None]:
+    """Generator that submits each storyboard prompt to ComfyUI and yields progress.
+
+    Reads projects/<project>/prompts/storyboards.json (written by save_storyboard_prompts).
+    Saves output images to outputs/<project>_storyboards/<shot_id>.png.
+    Yields one log line per event; final line is "DONE" or starts with "ERROR:".
+    """
+    prompts_file = REPO_ROOT / "projects" / project / "prompts" / "storyboards.json"
+    if not prompts_file.exists():
+        yield "ERROR: No prompts found — generate prompts in the Storyboard tab first"
+        return
+
+    try:
+        prompts = json.loads(prompts_file.read_text(encoding="utf-8"))
+    except Exception as exc:
+        yield f"ERROR: Could not read prompts: {exc}"
+        return
+
+    if not prompts:
+        yield "ERROR: Prompt file is empty"
+        return
+
+    try:
+        checkpoint = _find_checkpoint()
+    except ValueError as exc:
+        yield f"ERROR: {exc}"
+        return
+    yield f"Model: {checkpoint}"
+
+    out_dir = REPO_ROOT / "outputs" / f"{project}_storyboards"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    client_id = str(uuid.uuid4())
+    total = len(prompts)
+
+    for i, shot in enumerate(prompts):
+        shot_id = shot.get("shot_id", f"shot_{i:03d}")
+        prompt_text = shot.get("prompt", "")
+        negative = shot.get("negative_prompt", "realistic, photo, dark, scary, watermark")
+
+        yield f"[{i + 1}/{total}] Submitting {shot_id}..."
+
+        # Build and submit workflow
+        workflow = _comfyui_workflow(prompt_text, negative, shot_id, checkpoint)
+        try:
+            payload = json.dumps({"prompt": workflow, "client_id": client_id}).encode()
+            req = urllib.request.Request(
+                f"{COMFYUI_URL}/prompt",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read())
+            prompt_id: str = result.get("prompt_id", "")
+            if not prompt_id:
+                yield f"  ERROR: ComfyUI rejected prompt — {result}"
+                continue
+        except Exception as exc:
+            yield f"  ERROR: Could not reach ComfyUI: {exc}"
+            continue
+
+        yield f"  Queued (id {prompt_id[:8]}…) — waiting for GPU..."
+
+        # Poll history until the image is ready (max 5 minutes)
+        image_info: dict | None = None
+        for elapsed in range(0, 300, 2):
+            time.sleep(2)
+            try:
+                with urllib.request.urlopen(
+                    f"{COMFYUI_URL}/history/{prompt_id}", timeout=5
+                ) as resp:
+                    history = json.loads(resp.read())
+                if prompt_id in history:
+                    status_str = history[prompt_id].get("status", {}).get("status_str", "")
+                    if status_str == "error":
+                        yield f"  ERROR: ComfyUI reported an error for {shot_id}"
+                        break
+                    for node_out in history[prompt_id].get("outputs", {}).values():
+                        imgs = node_out.get("images", [])
+                        if imgs:
+                            image_info = imgs[0]
+                            break
+                    if image_info:
+                        break
+            except Exception:
+                pass
+            if elapsed > 0 and elapsed % 20 == 0:
+                yield f"  Still generating {shot_id}… ({elapsed}s elapsed)"
+
+        if not image_info:
+            yield f"  ERROR: Timed out waiting for {shot_id}"
+            continue
+
+        # Download the image and save as <shot_id>.png
+        filename = image_info["filename"]
+        subfolder = image_info.get("subfolder", "")
+        img_type = image_info.get("type", "output")
+        qs = f"filename={urllib.parse.quote(filename)}&type={img_type}"
+        if subfolder:
+            qs += f"&subfolder={urllib.parse.quote(subfolder)}"
+        try:
+            with urllib.request.urlopen(f"{COMFYUI_URL}/view?{qs}", timeout=30) as resp:
+                img_bytes = resp.read()
+            output_path = out_dir / f"{shot_id}.png"
+            output_path.write_bytes(img_bytes)
+            yield f"  Saved {shot_id}.png ({len(img_bytes) // 1024} KB)"
+        except Exception as exc:
+            yield f"  ERROR: Could not download {shot_id}: {exc}"
+
+    yield "DONE"
 
 
 def read_styleguide(project: str) -> str:
