@@ -173,6 +173,7 @@ def generate_lyrics() -> Response | tuple[Response, int]:
         body = request.get_json(force=True) or {}
         theme: str = body.get("theme", "").strip()
         style: str = body.get("style", "").strip()
+        language: str = body.get("language", "English").strip() or "English"
         raw_verses = body.get("verses", 3)
 
         # Validate before touching Claude
@@ -185,7 +186,7 @@ def generate_lyrics() -> Response | tuple[Response, int]:
         if not 1 <= verses <= 10:
             return _err("'verses' must be between 1 and 10", 400)
 
-        result = claude_api.generate_lyrics(theme, style, verses)
+        result = claude_api.generate_lyrics(theme, style, verses, language)
         return _ok(result)
     except ValueError as exc:
         return _err(str(exc), 400)

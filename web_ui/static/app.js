@@ -249,11 +249,13 @@ async function generateLyrics() {
   const themeInput = document.getElementById('lyrics-theme');
   const styleInput = document.getElementById('lyrics-style');
   const versesInput = document.getElementById('lyrics-verses');
+  const languageInput = document.getElementById('lyrics-language');
   const btn = document.getElementById('generate-lyrics-btn');
 
   const theme = themeInput ? themeInput.value.trim() : '';
   const style = styleInput ? styleInput.value.trim() : '';
   const verses = versesInput ? parseInt(versesInput.value, 10) || 3 : 3;
+  const language = languageInput ? languageInput.value.trim() : 'English';
 
   // Validate locally before any network call
   if (!theme) { toast('Enter a theme before generating lyrics', 'error'); themeInput?.focus(); return; }
@@ -262,7 +264,7 @@ async function generateLyrics() {
 
   setLoading(btn, true, 'Generating...');
   try {
-    const data = await api('POST', '/api/generate/lyrics', { theme, style, verses });
+    const data = await api('POST', '/api/generate/lyrics', { theme, style, verses, language });
     state.lyrics = data.data.lyrics_text;
 
     // CSS hides #lyrics-result with display:none — must use style.display to show it

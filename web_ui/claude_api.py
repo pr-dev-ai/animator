@@ -52,13 +52,17 @@ def _get_client() -> Anthropic:
     return _client
 
 
-def generate_lyrics(theme: str, style: str, num_verses: int) -> dict:  # noqa: D417
+_ROMAN_SCRIPT_LANGUAGES = {"hindi", "mandarin chinese", "japanese", "arabic", "korean", "thai"}
+
+
+def generate_lyrics(theme: str, style: str, num_verses: int, language: str = "English") -> dict:  # noqa: D417
     """Generate kids song lyrics for the given theme and style.
 
     Args:
         theme: The subject or topic of the song (e.g. "dinosaurs", "friendship").
         style: Musical style descriptor (e.g. "upbeat", "lullaby").
         num_verses: How many verses the song should have.
+        language: Language for the lyrics (e.g. "English", "Hindi").
 
     Returns:
         dict with keys: title (str), lyrics_text (str), verses (list[str]).
@@ -72,13 +76,22 @@ def generate_lyrics(theme: str, style: str, num_verses: int) -> dict:  # noqa: D
     if not 1 <= num_verses <= 10:
         raise ValueError(f"'num_verses' must be between 1 and 10, got {num_verses}")
 
+    language = language.strip() or "English"
+    use_roman = language.lower() in _ROMAN_SCRIPT_LANGUAGES
+
     client = _get_client()
     system_prompt = (
         "You are a children's songwriter. "
         "Write fun, educational, age-appropriate songs for kids aged 3-8."
     )
+    script_note = (
+        f" Write the lyrics in {language} but use Roman/English alphabet characters "
+        "(transliteration — no native script like Devanagari, Kanji, etc.)."
+        if use_roman
+        else f" Write entirely in {language}."
+    )
     user_prompt = (
-        f'Write a kids song about "{theme}" in a {style} style with {num_verses} verses. '
+        f'Write a kids song about "{theme}" in a {style} style with {num_verses} verses.{script_note} '
         "Return your answer as a JSON object with keys: "
         '"title" (string), "lyrics_text" (full song as one string), '
         '"verses" (array of verse strings, one element per verse). '
