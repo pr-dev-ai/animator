@@ -209,7 +209,14 @@ def generate_chords() -> Response | tuple[Response, int]:
         if len(lyrics) < 20:
             return _err("Lyrics are too short — add more content before generating chords", 400)
 
+        project_for_chords: str = body.get("project", "").strip()
         result = claude_api.generate_chords(lyrics)
+        # Persist to disk so instrumental generation can read it later
+        if project_for_chords:
+            chords_file = REPO_ROOT / "projects" / project_for_chords / "chords.json"
+            if chords_file.parent.is_dir():
+                import json as _json
+                chords_file.write_text(_json.dumps(result), encoding="utf-8")
         return _ok(result)
     except ValueError as exc:
         return _err(str(exc), 400)
@@ -297,6 +304,89 @@ def audio_import() -> Response | tuple[Response, int]:
     except Exception as exc:
         logger.exception("audio_import failed")
         return _err(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# Routes — music generation & mixing
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/music/generate")
+def music_generate() -> Response | tuple[Response, int]:
+    project = request.args.get("project", "").strip()
+    if not project:
+        return _err("'project' query param is required", 400)
+    if not (REPO_ROOT / "projects" / project).is_dir():
+        return _err(f"Project '{project}' not found", 404)
+    try:
+        from web_ui import pipeline_api
+        return _sse_stream(pipeline_api.generate_instrumental, project)
+    except Exception as exc:
+        logger.exception("music_generate failed")
+        return _err(str(exc))
+
+
+@app.route("/api/music/vocals", methods=["POST"])
+def music_vocals_import() -> Response | tuple[Response, int]:
+    try:
+        project: str = request.form.get("project", "").strip()
+        if not project:
+            return _err("'project' is required", 400)
+        wav_file = request.files.get("file")
+        if wav_file is None:
+            return _err("'file' is required", 400)
+        out_path = REPO_ROOT / "outputs" / f"{project}_vocals.wav"
+        out_path.parent.mkdir(exist_ok=True)
+        wav_file.save(str(out_path))
+        size_kb = out_path.stat().st_size // 1024
+        return _ok({"saved": out_path.name, "size_kb": size_kb})
+    except Exception as exc:
+        logger.exception("music_vocals_import failed")
+        return _err(str(exc))
+
+
+@app.route("/api/music/mix", methods=["POST"])
+def music_mix() -> Response | tuple[Response, int]:
+    try:
+        from web_ui import pipeline_api
+        body = request.get_json(force=True) or {}
+        project: str = body.get("project", "").strip()
+        ivol: float = float(body.get("instrumental_vol", 0.7))
+        vvol: float = float(body.get("vocal_vol", 1.0))
+        if not project:
+            return _err("'project' is required", 400)
+        out = pipeline_api.mix_song(project, ivol, vvol)
+        size_kb = (REPO_ROOT / "outputs" / f"{project}_song.wav").stat().st_size // 1024
+        return _ok({"file": f"{project}_song.wav", "size_kb": size_kb})
+    except ValueError as exc:
+        return _err(str(exc), 400)
+    except Exception as exc:
+        logger.exception("music_mix failed")
+        return _err(str(exc))
+
+
+@app.route("/api/music/instrumental/<string:project>")
+def serve_instrumental(project: str) -> Response | tuple[Response, int]:
+    path = REPO_ROOT / "outputs" / f"{project}_instrumental.wav"
+    if not path.exists():
+        return _err(f"No instrumental for '{project}'", 404)
+    return send_file(path, mimetype="audio/wav")
+
+
+@app.route("/api/music/vocals/<string:project>")
+def serve_vocals(project: str) -> Response | tuple[Response, int]:
+    path = REPO_ROOT / "outputs" / f"{project}_vocals.wav"
+    if not path.exists():
+        return _err(f"No vocal recording for '{project}'", 404)
+    return send_file(path, mimetype="audio/wav")
+
+
+@app.route("/api/music/song/<string:project>")
+def serve_song(project: str) -> Response | tuple[Response, int]:
+    path = REPO_ROOT / "outputs" / f"{project}_song.wav"
+    if not path.exists():
+        return _err(f"No final song for '{project}'", 404)
+    return send_file(path, mimetype="audio/wav")
 
 
 # ---------------------------------------------------------------------------

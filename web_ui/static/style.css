@@ -1037,3 +1037,23 @@ video {
     padding: 12px;
   }
 }
+
+/* ── Audio player row ────────────────────────────────────────────── */
+.audio-player-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.audio-player-row audio {
+  border-radius: 6px;
+  background: var(--card-bg);
+}
+
+input[type="range"].form-control {
+  padding: 4px 0;
+  background: transparent;
+  cursor: pointer;
+  accent-color: var(--accent);
+}

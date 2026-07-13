@@ -526,3 +526,96 @@ def read_styleguide(project: str) -> str:
     except Exception as exc:
         logger.error("Failed to read styleguide.md: %s", exc)
         return ""
+
+
+# ---------------------------------------------------------------------------
+# Music generation
+# ---------------------------------------------------------------------------
+
+def generate_instrumental(project: str) -> Generator[str, None, None]:
+    """Generate a synthesized instrumental WAV for a project.
+
+    Reads saved chords.json and lyrics.txt, asks Claude for a bar arrangement,
+    then synthesizes audio with music_gen.py.  Saves to outputs/<project>_instrumental.wav.
+    """
+    from web_ui import claude_api
+    from web_ui.music_gen import arrangement_to_wav
+
+    project_dir = REPO_ROOT / "projects" / project
+    if not project_dir.is_dir():
+        yield f"ERROR: Project '{project}' not found"
+        return
+
+    # Load chords saved by the Lyrics tab
+    chords_file = project_dir / "chords.json"
+    chords: list[str] = ["C", "G", "Am", "F"]
+    tempo_bpm: int = 120
+    style: str = "kids pop"
+    if chords_file.exists():
+        try:
+            cd = json.loads(chords_file.read_text(encoding="utf-8"))
+            chords = cd.get("chords") or chords
+            tempo_bpm = int(cd.get("tempo_bpm") or tempo_bpm)
+            style = cd.get("style") or style
+        except Exception:
+            pass
+
+    # Load lyrics
+    lyrics = ""
+    lyrics_file = project_dir / "lyrics.txt"
+    if lyrics_file.exists():
+        lyrics = lyrics_file.read_text(encoding="utf-8").strip()
+
+    yield f"Chords: {', '.join(chords)}  |  Tempo: {tempo_bpm} BPM"
+    yield "Asking Claude for bar-by-bar arrangement..."
+
+    try:
+        arrangement = claude_api.generate_music_arrangement(chords, lyrics, tempo_bpm, style)
+    except Exception as exc:
+        yield f"ERROR: {exc}"
+        return
+
+    bars = arrangement.get("bars", [])
+    resolved_tempo = arrangement.get("tempo_bpm", tempo_bpm)
+    yield f"Arrangement ready: {len(bars)} bars at {resolved_tempo} BPM"
+
+    # Save arrangement JSON
+    arr_path = project_dir / "arrangement.json"
+    try:
+        arr_path.write_text(json.dumps(arrangement, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    yield "Synthesizing audio..."
+    try:
+        wav_bytes = arrangement_to_wav(bars, resolved_tempo)
+    except Exception as exc:
+        yield f"ERROR synthesising audio: {exc}"
+        return
+
+    out_dir = REPO_ROOT / "outputs"
+    out_dir.mkdir(exist_ok=True)
+    out_path = out_dir / f"{project}_instrumental.wav"
+    out_path.write_bytes(wav_bytes)
+    size_kb = len(wav_bytes) // 1024
+    yield f"Saved instrumental: {out_path.name} ({size_kb} KB)"
+    yield "DONE"
+
+
+def mix_song(project: str, instrumental_vol: float = 0.7, vocal_vol: float = 1.0) -> str:
+    """Mix instrumental + vocal WAV into a final song. Returns output path."""
+    from web_ui.music_gen import mix_tracks
+
+    out_dir = REPO_ROOT / "outputs"
+    instr_path = out_dir / f"{project}_instrumental.wav"
+    vocal_path = out_dir / f"{project}_vocals.wav"
+
+    if not instr_path.exists():
+        raise ValueError("No instrumental found — generate it first")
+    if not vocal_path.exists():
+        raise ValueError("No vocal recording found — upload your Audacity WAV first")
+
+    mixed = mix_tracks(instr_path, vocal_path, instrumental_vol, vocal_vol)
+    out_path = out_dir / f"{project}_song.wav"
+    out_path.write_bytes(mixed)
+    return str(out_path)

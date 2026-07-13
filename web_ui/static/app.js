@@ -323,7 +323,7 @@ async function generateChords() {
 
   setLoading(btn, true, 'Generating chords...');
   try {
-    const data = await api('POST', '/api/generate/chords', { lyrics: state.lyrics });
+    const data = await api('POST', '/api/generate/chords', { lyrics: state.lyrics, project: state.project || '' });
 
     // HTML: <div id="chords-display" class="hidden"> + <pre id="chords-pre">
     const chordsDisplay = document.getElementById('chords-display');
@@ -573,6 +573,120 @@ async function uploadAudio(shotId, character, fileInput) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Music — instrumental generation, vocals upload, mixing
+// ---------------------------------------------------------------------------
+
+async function generateInstrumental() {
+  if (!await preflight(true)) return;
+  const logEl = document.getElementById('instrumental-log');
+  const btn = document.getElementById('gen-instrumental-btn');
+  const playerDiv = document.getElementById('instrumental-player');
+  if (!logEl) return;
+
+  logEl.classList.add('visible');
+  logEl.textContent = '';
+  hide('instrumental-player');
+  setLoading(btn, true, 'Generating...');
+
+  const source = new EventSource(`/api/music/generate?project=${encodeURIComponent(state.project)}`);
+  source.onmessage = event => {
+    const line = event.data;
+    if (line === 'DONE') {
+      source.close();
+      setLoading(btn, false);
+      // Show player
+      const audioEl = document.getElementById('instrumental-audio');
+      const dlEl = document.getElementById('instrumental-download');
+      if (audioEl) {
+        audioEl.src = `/api/music/instrumental/${encodeURIComponent(state.project)}?t=${Date.now()}`;
+        audioEl.load();
+      }
+      if (dlEl) dlEl.href = `/api/music/instrumental/${encodeURIComponent(state.project)}`;
+      if (playerDiv) playerDiv.style.display = 'flex';
+      toast('Instrumental ready!', 'success');
+    } else if (line.startsWith('ERROR')) {
+      appendLog(logEl, line);
+      source.close();
+      setLoading(btn, false);
+      toast(line, 'error');
+    } else {
+      appendLog(logEl, line);
+    }
+  };
+  source.onerror = () => { source.close(); setLoading(btn, false); };
+}
+
+async function uploadVocals() {
+  if (!await preflight(true)) return;
+  const fileInput = document.getElementById('vocal-file-input');
+  const btn = document.getElementById('upload-vocals-btn');
+  const statusEl = document.getElementById('vocals-status');
+
+  if (!fileInput || !fileInput.files.length) {
+    toast('Choose a WAV file first', 'error');
+    return;
+  }
+  const file = fileInput.files[0];
+  if (!file.name.toLowerCase().endsWith('.wav')) {
+    toast('Please upload a .wav file', 'error');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('project', state.project);
+  formData.append('file', file);
+
+  setLoading(btn, true, 'Uploading...');
+  try {
+    const resp = await fetch('/api/music/vocals', { method: 'POST', body: formData });
+    const data = await resp.json();
+    if (!data.ok) throw new Error(data.error || 'Upload failed');
+
+    if (statusEl) statusEl.textContent = `Uploaded: ${data.data.saved} (${data.data.size_kb} KB)`;
+    const audioEl = document.getElementById('vocal-audio');
+    if (audioEl) {
+      audioEl.src = `/api/music/vocals/${encodeURIComponent(state.project)}?t=${Date.now()}`;
+      audioEl.load();
+    }
+    show('vocal-player');
+    toast('Vocals uploaded!', 'success');
+  } catch (err) {
+    toast(`Upload failed: ${err.message}`, 'error');
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
+async function mixSong() {
+  if (!await preflight(true)) return;
+  const btn = document.getElementById('mix-song-btn');
+  const ivol = (document.getElementById('mix-ivol')?.value || 70) / 100;
+  const vvol = (document.getElementById('mix-vvol')?.value || 100) / 100;
+
+  setLoading(btn, true, 'Mixing...');
+  try {
+    const data = await api('POST', '/api/music/mix', {
+      project: state.project,
+      instrumental_vol: ivol,
+      vocal_vol: vvol,
+    });
+    const audioEl = document.getElementById('song-audio');
+    const dlEl = document.getElementById('song-download');
+    if (audioEl) {
+      audioEl.src = `/api/music/song/${encodeURIComponent(state.project)}?t=${Date.now()}`;
+      audioEl.load();
+    }
+    if (dlEl) dlEl.href = `/api/music/song/${encodeURIComponent(state.project)}`;
+    show('song-player');
+    toast(`Final song ready! (${data.data.size_kb} KB)`, 'success');
+  } catch (err) {
+    toast(`Mix failed: ${err.message}`, 'error');
+  } finally {
+    setLoading(btn, false);
+  }
+}
+
 async function runLipsync() {
   if (!state.project) { toast('Please select a project first', 'error'); return; }
 
@@ -787,7 +901,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('generate-images-btn')?.addEventListener('click', generateImages);
   document.getElementById('refresh-gallery-btn')?.addEventListener('click', loadGallery);
   document.getElementById('refresh-shots-btn')?.addEventListener('click', loadShotTable);
+  document.getElementById('gen-instrumental-btn')?.addEventListener('click', generateInstrumental);
+  document.getElementById('upload-vocals-btn')?.addEventListener('click', uploadVocals);
+  document.getElementById('mix-song-btn')?.addEventListener('click', mixSong);
   document.getElementById('run-lipsync-btn')?.addEventListener('click', runLipsync);
+
+  // Volume slider labels
+  document.getElementById('mix-ivol')?.addEventListener('input', e => {
+    const label = document.getElementById('mix-ivol-label');
+    if (label) label.textContent = e.target.value + '%';
+  });
+  document.getElementById('mix-vvol')?.addEventListener('input', e => {
+    const label = document.getElementById('mix-vvol-label');
+    if (label) label.textContent = e.target.value + '%';
+  });
   document.getElementById('build-animatic-btn')?.addEventListener('click', buildAnimatic);
 
   // Sidebar nav — HTML uses <li class="nav-item"> NOT <a> tags

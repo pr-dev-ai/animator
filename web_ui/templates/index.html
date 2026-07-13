@@ -440,17 +440,93 @@
                aria-labelledby="nav-audio"
                tabindex="-1">
         <h1 class="panel-title">Audio &amp; Lip Sync</h1>
-        <p class="panel-subtitle">Upload recorded WAV files for each shot, then generate lip-sync data.</p>
+        <p class="panel-subtitle">Generate instrumental music, record your vocals, then mix into a song.</p>
 
-        <div class="info-card" role="note">
-          <span class="info-icon" aria-hidden="true">ℹ️</span>
-          <span>
-            Upload your recorded WAV files for each shot, then generate lip-sync data to
-            animate your characters' mouths.
-          </span>
+        <!-- ── BACKGROUND MUSIC ─────────────────────────────────────── -->
+        <div class="card">
+          <div class="card-title">
+            <span class="card-title-icon" aria-hidden="true">🎵</span>
+            Background Instrumental
+          </div>
+          <p class="section-note">
+            Uses your saved chords &amp; lyrics to synthesise a full instrumental track.
+            Generate chords in the Lyrics tab first.
+          </p>
+          <div class="btn-row mb-2">
+            <button type="button" id="gen-instrumental-btn" class="btn btn-accent">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-icon" aria-hidden="true">🎹</span>
+              Generate Instrumental
+            </button>
+          </div>
+          <pre id="instrumental-log" class="log-panel" role="log" aria-live="polite"></pre>
+          <div id="instrumental-player" style="display:none" class="audio-player-row">
+            <audio id="instrumental-audio" controls style="width:100%"></audio>
+            <a id="instrumental-download" class="btn btn-secondary btn-sm" download>
+              ⬇ Download WAV
+            </a>
+          </div>
         </div>
 
+        <!-- ── VOCAL RECORDING ──────────────────────────────────────── -->
         <div class="card">
+          <div class="card-title">
+            <span class="card-title-icon" aria-hidden="true">🎤</span>
+            Your Vocal Recording
+          </div>
+          <p class="section-note">
+            Record your vocals in <strong>Audacity</strong> (or any DAW), export as WAV, then upload here.
+          </p>
+          <div class="form-group">
+            <label for="vocal-file-input">Choose WAV file</label>
+            <input type="file" id="vocal-file-input" accept=".wav,audio/wav" class="form-control" />
+          </div>
+          <div class="btn-row mb-2">
+            <button type="button" id="upload-vocals-btn" class="btn btn-accent">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-icon" aria-hidden="true">⬆</span>
+              Upload Vocals
+            </button>
+            <span id="vocals-status" class="section-note"></span>
+          </div>
+          <div id="vocal-player" style="display:none" class="audio-player-row">
+            <audio id="vocal-audio" controls style="width:100%"></audio>
+          </div>
+        </div>
+
+        <!-- ── MIX FINAL SONG ───────────────────────────────────────── -->
+        <div class="card">
+          <div class="card-title">
+            <span class="card-title-icon" aria-hidden="true">🎚️</span>
+            Mix Final Song
+          </div>
+          <p class="section-note">Combine instrumental + vocals into one WAV file.</p>
+          <div class="form-group">
+            <label for="mix-ivol">Instrumental volume: <span id="mix-ivol-label">70%</span></label>
+            <input type="range" id="mix-ivol" min="0" max="100" value="70" class="form-control" />
+          </div>
+          <div class="form-group">
+            <label for="mix-vvol">Vocals volume: <span id="mix-vvol-label">100%</span></label>
+            <input type="range" id="mix-vvol" min="0" max="100" value="100" class="form-control" />
+          </div>
+          <div class="btn-row mb-2">
+            <button type="button" id="mix-song-btn" class="btn btn-accent">
+              <span class="btn-spinner" aria-hidden="true"></span>
+              <span class="btn-icon" aria-hidden="true">🎶</span>
+              Mix Tracks
+            </button>
+          </div>
+          <div id="song-player" style="display:none" class="audio-player-row">
+            <audio id="song-audio" controls style="width:100%"></audio>
+            <a id="song-download" class="btn btn-secondary btn-sm" download>
+              ⬇ Download Final Song
+            </a>
+          </div>
+        </div>
+
+        <div class="divider-label">Shot lip-sync audio (per-shot WAV files for animation)</div>
+
+        <div class="card" style="margin-top:12px">
           <div class="btn-row mb-2">
             <button type="button"
                     id="refresh-shots-btn"

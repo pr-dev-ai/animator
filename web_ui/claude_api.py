@@ -170,6 +170,46 @@ def generate_chords(lyrics_text: str) -> dict:
         return {"chords": [], "chord_chart": raw_text}
 
 
+def generate_music_arrangement(
+    chords: list[str], lyrics: str, tempo_bpm: int, style: str
+) -> dict:
+    """Generate a bar-by-bar chord arrangement for music synthesis.
+
+    Returns:
+        dict with keys: tempo_bpm (int), bars (list of {chord, beats}).
+    """
+    check_api_key()
+    client = _get_client()
+    chord_list = ", ".join(chords) if chords else "C, G, Am, F"
+    user_prompt = (
+        f"Create a bar-by-bar chord arrangement for a kids song.\n"
+        f"Available chords: {chord_list}\n"
+        f"Tempo: {tempo_bpm} BPM, Style: {style}\n"
+        f"Lyrics:\n{lyrics}\n\n"
+        "Generate 16–32 bars covering intro, verses, chorus, outro. "
+        "Match chord changes to the lyric phrasing.\n"
+        "Return a JSON object with keys:\n"
+        '  "tempo_bpm": number,\n'
+        '  "bars": array of {"chord": string, "beats": number (2 or 4)}\n'
+        "Output only the JSON object, no other text."
+    )
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=600,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Claude API call failed in generate_music_arrangement: {exc}") from exc
+
+    raw = _extract_text(response)
+    try:
+        return json.loads(_strip_fences(raw))
+    except json.JSONDecodeError:
+        cycle = (chords or ["C", "G", "Am", "F"]) * 4
+        return {"tempo_bpm": tempo_bpm, "bars": [{"chord": c, "beats": 4} for c in cycle]}
+
+
 def generate_storyboard_prompts(
     project_name: str, shotlist: list, style_guide: str, lyrics: str = ""
 ) -> list:
