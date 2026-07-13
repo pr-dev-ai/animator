@@ -616,6 +616,12 @@ input[type="file"]::-webkit-file-upload-button {
   background-color: rgba(233, 69, 96, 0.06);
 }
 
+.project-list-items li.selected {
+  border-color: var(--accent);
+  background-color: rgba(233, 69, 96, 0.12);
+  font-weight: 600;
+}
+
 .project-item {
   display: flex;
   align-items: center;
