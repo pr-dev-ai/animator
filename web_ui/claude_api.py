@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 _client = None
 
 
+def check_api_key() -> None:
+    """Raise ValueError if the API key is missing or still the placeholder value."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not key:
+        raise ValueError("ANTHROPIC_API_KEY is not set in .env")
+    if "your-key-here" in key or key == "sk-ant-...your-key-here...":
+        raise ValueError("ANTHROPIC_API_KEY still contains the placeholder value — add your real key to .env")
+
+
 def _extract_text(response) -> str:
     """Return the text content from a Claude response, skipping ThinkingBlocks."""
     for block in response.content:
@@ -43,7 +52,7 @@ def _get_client() -> Anthropic:
     return _client
 
 
-def generate_lyrics(theme: str, style: str, num_verses: int) -> dict:
+def generate_lyrics(theme: str, style: str, num_verses: int) -> dict:  # noqa: D417
     """Generate kids song lyrics for the given theme and style.
 
     Args:
@@ -57,6 +66,12 @@ def generate_lyrics(theme: str, style: str, num_verses: int) -> dict:
     Raises:
         RuntimeError: If the Claude API call fails.
     """
+    check_api_key()
+    if not theme or not theme.strip():
+        raise ValueError("'theme' is required to generate lyrics")
+    if not 1 <= num_verses <= 10:
+        raise ValueError(f"'num_verses' must be between 1 and 10, got {num_verses}")
+
     client = _get_client()
     system_prompt = (
         "You are a children's songwriter. "
@@ -72,8 +87,8 @@ def generate_lyrics(theme: str, style: str, num_verses: int) -> dict:
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-5",
-            max_tokens=1500,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -102,6 +117,12 @@ def generate_chords(lyrics_text: str) -> dict:
     Raises:
         RuntimeError: If the Claude API call fails.
     """
+    check_api_key()
+    if not lyrics_text or not lyrics_text.strip():
+        raise ValueError("'lyrics_text' cannot be empty — generate or paste lyrics first")
+    if len(lyrics_text.strip()) < 20:
+        raise ValueError("Lyrics are too short — add more content before generating chords")
+
     client = _get_client()
     system_prompt = (
         "You are a music teacher specialising in simple ukulele arrangements for children. "
@@ -118,7 +139,7 @@ def generate_chords(lyrics_text: str) -> dict:
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-5",
+            model="claude-haiku-4-5-20251001",
             max_tokens=800,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
@@ -154,6 +175,14 @@ def generate_storyboard_prompts(
     Raises:
         RuntimeError: If the Claude API call fails.
     """
+    check_api_key()
+    if not project_name or not project_name.strip():
+        raise ValueError("'project_name' is required to generate storyboard prompts")
+    if not shotlist:
+        raise ValueError(
+            f"Project '{project_name}' has no shots in shotlist.csv — add shots before generating prompts"
+        )
+
     client = _get_client()
 
     sd_prefix = (
@@ -186,8 +215,8 @@ def generate_storyboard_prompts(
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-5",
-            max_tokens=2000,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1200,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )

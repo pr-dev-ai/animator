@@ -83,6 +83,37 @@ function hide(id) {
 }
 
 // ---------------------------------------------------------------------------
+// Pre-flight validation
+// ---------------------------------------------------------------------------
+
+// Cache result so we don't hit the endpoint on every button click.
+let _configOk = null;
+
+async function preflight(requireProject = false) {
+  // Check API key once, cache result
+  if (_configOk === null) {
+    try {
+      await api('GET', '/api/config/check');
+      _configOk = true;
+    } catch (err) {
+      _configOk = false;
+      toast(`API key error: ${err.message}`, 'error');
+      return false;
+    }
+  } else if (!_configOk) {
+    toast('ANTHROPIC_API_KEY is not configured in .env — restart the server after adding it', 'error');
+    return false;
+  }
+
+  if (requireProject && !state.project) {
+    toast('Select a project first (Project tab)', 'error');
+    return false;
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Tab navigation
 // ---------------------------------------------------------------------------
 
@@ -224,7 +255,10 @@ async function generateLyrics() {
   const style = styleInput ? styleInput.value.trim() : '';
   const verses = versesInput ? parseInt(versesInput.value, 10) || 3 : 3;
 
-  if (!theme) { toast('Please enter a theme', 'error'); return; }
+  // Validate locally before any network call
+  if (!theme) { toast('Enter a theme before generating lyrics', 'error'); themeInput?.focus(); return; }
+  if (verses < 1 || verses > 10) { toast('Number of verses must be between 1 and 10', 'error'); versesInput?.focus(); return; }
+  if (!await preflight()) return;
 
   setLoading(btn, true, 'Generating...');
   try {
@@ -252,7 +286,12 @@ async function generateChords() {
   const textarea = document.getElementById('lyrics-textarea');
   if (textarea && textarea.value.trim()) state.lyrics = textarea.value.trim();
 
-  if (!state.lyrics) { toast('Please generate lyrics first', 'error'); return; }
+  // Validate before any network call
+  if (!state.lyrics || state.lyrics.trim().length < 20) {
+    toast('Add more lyrics before generating chords (at least a few lines)', 'error');
+    return;
+  }
+  if (!await preflight()) return;
 
   setLoading(btn, true, 'Generating chords...');
   try {
@@ -312,7 +351,8 @@ function renderPromptCard(shot) {
 }
 
 async function generatePrompts() {
-  if (!state.project) { toast('Please select a project first', 'error'); return; }
+  // Validate before any network call
+  if (!await preflight(true)) return;
 
   const btn = document.getElementById('generate-prompts-btn');
   const styleInput = document.getElementById('styleguide-style') || document.getElementById('prompt-style');

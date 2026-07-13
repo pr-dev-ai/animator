@@ -141,6 +141,26 @@ def project_shots(name: str) -> Response | tuple[Response, int]:
 
 
 # ---------------------------------------------------------------------------
+# Routes — config check
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/config/check")
+def config_check() -> Response:
+    """Fast pre-flight check: verifies API key is set before any Claude call."""
+    try:
+        from web_ui import claude_api  # lazy import
+
+        claude_api.check_api_key()
+        return _ok({"api_key": True})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc), "api_key": False}), 400
+    except Exception as exc:
+        logger.exception("config_check failed")
+        return _err(str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Routes — Claude generation
 # ---------------------------------------------------------------------------
 
@@ -151,15 +171,24 @@ def generate_lyrics() -> Response | tuple[Response, int]:
         from web_ui import claude_api  # lazy import
 
         body = request.get_json(force=True) or {}
-        theme: str = body.get("theme", "")
-        style: str = body.get("style", "")
+        theme: str = body.get("theme", "").strip()
+        style: str = body.get("style", "").strip()
         raw_verses = body.get("verses", 3)
+
+        # Validate before touching Claude
+        if not theme:
+            return _err("'theme' is required", 400)
         try:
             verses: int = int(raw_verses)
         except (TypeError, ValueError):
-            return _err(f"'verses' must be an integer, got {raw_verses!r}", 400)
+            return _err(f"'verses' must be a number, got {raw_verses!r}", 400)
+        if not 1 <= verses <= 10:
+            return _err("'verses' must be between 1 and 10", 400)
+
         result = claude_api.generate_lyrics(theme, style, verses)
         return _ok(result)
+    except ValueError as exc:
+        return _err(str(exc), 400)
     except Exception as exc:
         logger.exception("generate_lyrics failed")
         return _err(str(exc))
@@ -171,9 +200,18 @@ def generate_chords() -> Response | tuple[Response, int]:
         from web_ui import claude_api  # lazy import
 
         body = request.get_json(force=True) or {}
-        lyrics: str = body.get("lyrics", "")
+        lyrics: str = body.get("lyrics", "").strip()
+
+        # Validate before touching Claude
+        if not lyrics:
+            return _err("'lyrics' is required — generate or paste lyrics first", 400)
+        if len(lyrics) < 20:
+            return _err("Lyrics are too short — add more content before generating chords", 400)
+
         result = claude_api.generate_chords(lyrics)
         return _ok(result)
+    except ValueError as exc:
+        return _err(str(exc), 400)
     except Exception as exc:
         logger.exception("generate_chords failed")
         return _err(str(exc))
@@ -188,17 +226,26 @@ def generate_prompts() -> Response | tuple[Response, int]:
         body = request.get_json(force=True) or {}
         project: str = body.get("project", "").strip()
         style: str = body.get("style", "")
+
+        # Validate before touching Claude
         if not project:
-            return _err("'project' is required", 400)
+            return _err("'project' is required — select a project first", 400)
+        project_dir = REPO_ROOT / "projects" / project
+        if not project_dir.is_dir():
+            return _err(f"Project '{project}' not found — create it in the Project tab first", 404)
 
         shots = pipeline_api.get_project_shots(project)
+        if not shots:
+            return _err(
+                f"Project '{project}' has no shots in shotlist.csv — add shots before generating prompts",
+                400,
+            )
 
-        style_guide_path = REPO_ROOT / "projects" / project / "styleguide.md"
+        style_guide_path = project_dir / "styleguide.md"
         style_guide: str = ""
         if style_guide_path.exists():
             style_guide = style_guide_path.read_text(encoding="utf-8")
 
-        # Merge style param into style_guide if both provided
         if style and style_guide:
             style_guide = f"Style: {style}\n\n{style_guide}"
         elif style:
@@ -207,6 +254,8 @@ def generate_prompts() -> Response | tuple[Response, int]:
         prompts = claude_api.generate_storyboard_prompts(project, shots, style_guide)
         pipeline_api.save_storyboard_prompts(project, prompts)
         return _ok(prompts)
+    except ValueError as exc:
+        return _err(str(exc), 400)
     except Exception as exc:
         logger.exception("generate_prompts failed")
         return _err(str(exc))
