@@ -33,7 +33,7 @@ if [ ! -f ComfyUI/main.py ] || [ ! -d ComfyUI/comfy/ldm/models ]; then
   cd ComfyUI
   echo "Installing dependencies (this may take 5-10 minutes)..."
   pip3 install --no-cache-dir -r requirements.txt
-  pip3 install --no-cache-dir sqlalchemy alembic aiohttp || true
+  pip3 install --no-cache-dir sqlalchemy alembic aiohttp requests || true
   echo "ComfyUI setup complete!"
 else
   cd ComfyUI
@@ -49,8 +49,8 @@ fi
 
 echo "Verifying dependencies..."
 pip3 install --no-cache-dir -r requirements.txt 2>&1 | tail -3 || true
-python3 -c "import sqlalchemy, alembic, aiohttp" 2>/dev/null || \
-  pip3 install --no-cache-dir sqlalchemy alembic aiohttp
+python3 -c "import sqlalchemy, alembic, aiohttp, requests" 2>/dev/null || \
+  pip3 install --no-cache-dir sqlalchemy alembic aiohttp requests
 
 # ── Start ComfyUI ─────────────────────────────────────────────────────────────
 echo "Starting ComfyUI on port 8188..."
