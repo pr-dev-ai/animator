@@ -467,10 +467,10 @@ def generate_storyboard_images(project: str) -> Generator[str, None, None]:
 
         yield f"  Queued (id {prompt_id[:8]}…) — waiting for GPU..."
 
-        # Poll history until the image is ready (max 5 minutes)
+        # Poll history until the image is ready (max 5 minutes, 5s interval)
         image_info: dict | None = None
-        for elapsed in range(0, 300, 2):
-            time.sleep(2)
+        for elapsed in range(0, 300, 5):
+            time.sleep(5)
             try:
                 with urllib.request.urlopen(
                     f"{COMFYUI_URL}/history/{prompt_id}", timeout=5
@@ -490,7 +490,7 @@ def generate_storyboard_images(project: str) -> Generator[str, None, None]:
                         break
             except Exception:
                 pass
-            if elapsed > 0 and elapsed % 20 == 0:
+            if elapsed > 0 and elapsed % 30 == 0:
                 yield f"  Still generating {shot_id}… ({elapsed}s elapsed)"
 
         if not image_info:

@@ -86,4 +86,11 @@ echo "Open your browser at: http://localhost:5000"
 echo "(Press Ctrl+C to stop)"
 echo ""
 
-python3 -m web_ui.server
+exec gunicorn \
+    --workers 2 \
+    --worker-class gthread \
+    --threads 8 \
+    --timeout 600 \
+    --bind 0.0.0.0:5000 \
+    --log-level warning \
+    "web_ui.server:app"

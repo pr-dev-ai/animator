@@ -6,6 +6,9 @@ services:
     container_name: comfyui
     deploy:
       resources:
+        limits:
+          cpus: "10"
+          memory: 10G
         reservations:
           devices:
             - driver: nvidia

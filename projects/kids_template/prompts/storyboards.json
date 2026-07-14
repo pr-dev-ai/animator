@@ -1,0 +1,67 @@
+[
+  {
+    "shot_id": "SH010",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, title card 'Nach Nach Khush Ho Jao' in large friendly letters, sunny meadow with green grass, bright yellow sun, blue sky, cheerful butterflies flying, colorful flowers scattered, vibrant and inviting scene",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH020",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, happy brown bunny character singing with open mouth smile, standing up energetically with arms raised, large expressive eyes, round fluffy body, stage or meadow background, bright sunlight, bunny gesturing to get up and dance, movement in body language",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH030",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, cheerful yellow duck character singing with open beak, demonstrating dance moves with wings up, moving left and right, bouncing motion, large friendly eyes, round body, bright garden or park setting, showing side-to-side movement and jumping",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH040",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, overhead top-down view of multiple cute animals dancing together in circle, bunny duck cat dog all in motion with raised arms and legs, colorful meadow background, sunny day, all animals smiling and jumping, energetic movement, bright primary colors",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH050",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, orange cat character singing with confident expression, striking dance poses like a hero, hands on hips and doing cool moves, large bright eyes, round body, smiling proudly, stage spotlight effect, showing off dance skills with joy and confidence",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH060",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, brown dog character singing and leading circle dance, paws linked with other animals in circle formation, all animals spinning and dancing together, happy expressions, colorful meadow setting, showing friendship and group participation, holding hands moving in circle",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH070",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, all four animals lined up in a row clapping hands together rhythmically, swaying and bouncing with joy, big smiles on all faces, clapping motion shown, colorful grass background, sunny day, showing happiness and celebrating together, musical energy in their poses",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH080",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, all animals waving goodbye with big friendly waves, smiling warmly, camera pulling back and zooming out, colorful meadow and sky visible, sun shining bright, warm and happy ending feeling, all characters waving hands in farewell gesture, soft fade effect",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH100",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, wide establishing shot of beautiful colorful park with green grass, playground equipment, trees with round canopies, bright blue sky, yellow sun, flowers and bushes, friendly park benches, cheerful and inviting environment, perfect place for children to play",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH110",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, friendly main character entering park with happy wave, greeting other child characters nearby, smiling warmly, open arms in welcoming gesture, colorful park background, bright daylight, joyful expression, ready to play and have fun with friends",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH120",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, close-up of main character's face showing excited big smile, wide bright eyes full of joy and enthusiasm, rosy cheeks, happy expression, light background or blurred park setting, expressing excitement and happiness, cheerful and lively emotion visible",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH130",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, main character and friend character standing together side by side, holding hands or with arms around each other, both smiling happily, similar age and size, park setting in background with trees and grass, showing friendship and togetherness, warm and friendly interaction",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  },
+  {
+    "shot_id": "SH140",
+    "prompt": "cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, both characters running together happily toward bright horizon, arms swinging with movement, big smiles and happy expressions, green meadow or park landscape, blue sky, sun shining brightly, movement lines showing action, joyful and hopeful scene, friends together running toward adventure",
+    "negative_prompt": "realistic, photo, dark, scary, complex background, watermark, text, logo, adult"
+  }
+]

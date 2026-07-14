@@ -1,115 +1,51 @@
-# Storyboard Prompts - Kids Animation Template
+## SH010
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, title card 'Nach Nach Khush Ho Jao' in large friendly letters, sunny meadow with green grass, bright yellow sun, blue sky, cheerful butterflies flying, colorful flowers scattered, vibrant and inviting scene
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-<!-- 
-  All prompts use the kids animation style base:
-    cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors
-  Most shots share the negative prompt:
-    realistic, photo, dark, scary, complex background, watermark, text, logo
-  Exception: SH010 (title card) omits 'text' from the negative prompt so rendered text is not suppressed.
-  Add any title text as a video-editor overlay rather than relying on the image model to render it.
--->
+## SH020
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, happy brown bunny character singing with open mouth smile, standing up energetically with arms raised, large expressive eyes, round fluffy body, stage or meadow background, bright sunlight, bunny gesturing to get up and dance, movement in body language
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH010 - Opening Title Card
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-wide shot, sunny meadow, rolling green hills, colourful flowers, big yellow sun in blue sky, cheerful morning scene,
-realistic, photo, dark, scary, complex background, watermark, logo
-```
-<!-- Note: 'text' removed from negative prompt so the title card can render visible text. -->
-<!-- Add your title as an overlay in the video editor after rendering. -->
+## SH030
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, cheerful yellow duck character singing with open beak, demonstrating dance moves with wings up, moving left and right, bouncing motion, large friendly eyes, round body, bright garden or park setting, showing side-to-side movement and jumping
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH020 - Bunny Singing Verse 1
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-medium shot, happy white bunny character singing, open mouth smile, round body, large expressive eyes, rosy cheeks,
-green meadow background, yellow sun, musical notes floating around,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH040
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, overhead top-down view of multiple cute animals dancing together in circle, bunny duck cat dog all in motion with raised arms and legs, colorful meadow background, sunny day, all animals smiling and jumping, energetic movement, bright primary colors
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH030 - Duck Singing Verse 2
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-medium shot, cheerful yellow duck singing, wings slightly raised, big orange beak open, large round eyes,
-green meadow background, blue sky, fluffy white clouds,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH050
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, orange cat character singing with confident expression, striking dance poses like a hero, hands on hips and doing cool moves, large bright eyes, round body, smiling proudly, stage spotlight effect, showing off dance skills with joy and confidence
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH040 - All Animals Dancing (Overhead)
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-overhead view, four cute animals dancing in circle, bunny duck cat dog, viewed from above, green meadow,
-colourful flowers around them, cheerful sunny day,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH060
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, brown dog character singing and leading circle dance, paws linked with other animals in circle formation, all animals spinning and dancing together, happy expressions, colorful meadow setting, showing friendship and group participation, holding hands moving in circle
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH050 - Cat Singing Verse 3
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-medium shot, fluffy orange cat singing, tail held high, wide grin showing small teeth, large green eyes,
-green meadow background, flowers, bright sunlight,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH070
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, all four animals lined up in a row clapping hands together rhythmically, swaying and bouncing with joy, big smiles on all faces, clapping motion shown, colorful grass background, sunny day, showing happiness and celebrating together, musical energy in their poses
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH060 - Dog Singing Verse 4
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-medium shot, brown dog leaping joyfully, tongue out, tail wagging, big floppy ears, round happy eyes,
-green meadow background, blue sky, sunshine,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH080
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, all animals waving goodbye with big friendly waves, smiling warmly, camera pulling back and zooming out, colorful meadow and sky visible, sun shining bright, warm and happy ending feeling, all characters waving hands in farewell gesture, soft fade effect
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH070 - All Animals Clapping Together
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-wide shot, four cute animals in a row, bunny duck cat dog, all clapping and swaying, joyful expressions,
-green meadow background, big yellow sun, colourful flowers,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH100
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, wide establishing shot of beautiful colorful park with green grass, playground equipment, trees with round canopies, bright blue sky, yellow sun, flowers and bushes, friendly park benches, cheerful and inviting environment, perfect place for children to play
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH080 - Animals Wave Goodbye
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-wide shot, four cute animals waving at camera, big friendly smiles, meadow background, camera pulled back,
-bright even lighting, cheerful farewell scene,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH110
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, friendly main character entering park with happy wave, greeting other child characters nearby, smiling warmly, open arms in welcoming gesture, colorful park background, bright daylight, joyful expression, ready to play and have fun with friends
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH100 - Colourful Park Establishing Shot
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-wide shot, bright colourful park, playground swings, slide, big green trees, blue sky, puffy white clouds,
-no characters visible, establishing scene, cheerful daytime,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH120
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, close-up of main character's face showing excited big smile, wide bright eyes full of joy and enthusiasm, rosy cheeks, happy expression, light background or blurred park setting, expressing excitement and happiness, cheerful and lively emotion visible
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH110 - MainCharacter Enters Park
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-medium shot, young child character entering park, curious expression, looking around with wonder, colourful clothes,
-bright park background with trees and playground,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH130
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, main character and friend character standing together side by side, holding hands or with arms around each other, both smiling happily, similar age and size, park setting in background with trees and grass, showing friendship and togetherness, warm and friendly interaction
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
 
-## SH120 - MainCharacter Close-up Reaction
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-close-up, young child's face, wide sparkling eyes, huge excited smile, rosy cheeks, eyebrows raised in delight,
-bright blurred background, expressive cartoon face,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
-
-## SH130 - MainCharacter and Friend Together
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-medium shot, two characters side by side, child and animal friend, both pointing at something off-screen,
-excited matching expressions, colourful park background, sunny day,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
-
-## SH140 - Characters Run Toward Horizon
-```
-cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors,
-wide shot, two small characters running happily toward horizon, viewed from behind, colourful park,
-bright sunshine, vibrant green grass, cheerful adventure feeling,
-realistic, photo, dark, scary, complex background, watermark, text, logo
-```
+## SH140
+**Prompt:** cartoon, flat color, children's illustration, 2d, cute, bright, bold outlines, simple shapes, pastel colors, both characters running together happily toward bright horizon, arms swinging with movement, big smiles and happy expressions, green meadow or park landscape, blue sky, sun shining brightly, movement lines showing action, joyful and hopeful scene, friends together running toward adventure
+**Negative:** realistic, photo, dark, scary, complex background, watermark, text, logo, adult
