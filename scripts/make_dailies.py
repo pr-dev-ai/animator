@@ -6,6 +6,11 @@ This is an "enhanced slideshow" renderer, not AI video:
   * Ken Burns motion (pans / zooms) via the zoompan filter, varied per shot.
   * Crossfades between shots via the xfade filter.
   * Optional beat-synced cuts that land on musical BAR boundaries (librosa).
+  * Optional lyric-synced shots: when the project has a song, scripts/lyric_sync
+    transcribes it and puts each shot on screen while the lyric it depicts is
+    actually being sung, stretching the animatic across the whole song instead
+    of stopping at sum(shotlist durations).  Falls back to the beat-synced
+    shotlist durations below whenever that cannot be done confidently.
   * A properly timed audio track (dialogue placed at absolute offsets on a
     timeline, padded/trimmed to shot duration) so audio cannot drift out of
     sync with picture.
@@ -169,6 +174,20 @@ def make_placeholder(temp_dir: Path, shot_id: str) -> Path:
     return placeholder
 
 
+def probe_duration(path: Path):
+    """Return the duration of a media file in seconds, or 0.0 if unknown."""
+    result = subprocess.run([
+        FFPROBE, "-v", "error", "-show_entries", "format=duration",
+        "-of", "csv=p=0", str(path),
+    ], capture_output=True, text=True)
+    if result.returncode != 0:
+        return 0.0
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return 0.0
+
+
 def probe_image_size(path: Path):
     """Return (width, height) of an image/video file via ffprobe."""
     result = subprocess.run([
@@ -243,13 +262,21 @@ def read_dialogue(project_dir: Path, project_name: str):
     return result
 
 
-def bar_times_from_arrangement(project_dir: Path):
+def bar_times_from_arrangement(project_dir: Path, audio_duration: float = 0.0):
     """Read the exact bar grid from arrangement.json, if the project has one.
 
     This is the authoritative source for music the app generated itself:
     web_ui/music_gen.py renders each bar back-to-back starting at t=0, so the
     downbeats are exact by construction.  Always prefer this over guessing the
     beat grid from the audio signal.
+
+    The arrangement describes the *instrumental*, which is often shorter than
+    the finished song: the test project's arrangement is 32 bars (64.0s) while
+    the ACE-Step song built from it runs 120.0s.  A grid that stops at 64s would
+    leave every later cut with nothing to snap to, so once the arrangement runs
+    out we keep laying down bars of the same length until we cover the audio.
+    That is sound for this app's metronomic beds -- the 120s song measures at
+    119.68 BPM, i.e. the same grid -- but it does assume a steady tempo.
     """
     arrangement_json = project_dir / "arrangement.json"
     if not arrangement_json.exists():
@@ -269,13 +296,32 @@ def bar_times_from_arrangement(project_dir: Path):
             bar_times.append(t)
             t += float(bar.get("beats", 4)) * beat_seconds
         bar_times.append(t)  # end of the final bar is also a valid cut point
-        bar_seconds = t / len(bars)
+        arrangement_total = t
+        bar_seconds = arrangement_total / len(bars)
+
+        extended = 0
+        if audio_duration > arrangement_total + bar_seconds * 0.5 and bar_seconds > 0:
+            while t < audio_duration:
+                t += bar_seconds
+                bar_times.append(t)
+                extended += 1
+
+        note = (f", extended by {extended} bars to cover {audio_duration:.2f}s of audio"
+                if extended else "")
         log(f"Bar grid from arrangement.json: {tempo:.1f} BPM, {len(bars)} bars, "
-            f"{bar_seconds:.2f}s per bar ({t:.2f}s total)")
+            f"{bar_seconds:.2f}s per bar ({arrangement_total:.2f}s total){note}")
         return bar_times, tempo, bar_seconds
     except Exception as exc:
         logger.warning("Could not read arrangement.json (%s); will analyse audio instead.", exc)
         return None, None, None
+
+
+def build_bar_grid(project_dir: Path, music: Path, audio_duration: float):
+    """Best available bar grid for `music`: arrangement first, then librosa."""
+    bar_times, tempo, bar_seconds = bar_times_from_arrangement(project_dir, audio_duration)
+    if not bar_times:
+        bar_times, tempo, bar_seconds = detect_bar_times(music)
+    return bar_times, tempo, bar_seconds
 
 
 def _normalise_tempo(tempo: float, low: float = 70.0, high: float = 160.0):
@@ -605,7 +651,8 @@ def assemble(clips, durations, xfade_duration: float, audio_track,
 
 
 def create_animatic(project_name: str, output_path: Path, beat_sync: bool,
-                    xfade_duration: float, motion: bool):
+                    xfade_duration: float, motion: bool,
+                    use_lyric_sync: bool = True):
     """Create animatic from storyboard images and audio."""
     project_dir = PROJECTS_DIR / project_name
     shotlist_csv = project_dir / "shotlist.csv"
@@ -630,18 +677,40 @@ def create_animatic(project_name: str, output_path: Path, beat_sync: bool,
     else:
         log("No music bed found; audio will be dialogue-only (or silent).")
 
+    music_duration = probe_duration(music) if music else 0.0
+
+    bar_times = bar_seconds = None
     if beat_sync and music:
         # Prefer the exact grid the music was generated from; only analyse the
         # waveform when there is no arrangement (e.g. an imported song).
-        bar_times, tempo, bar_seconds = bar_times_from_arrangement(project_dir)
-        if not bar_times:
-            bar_times, tempo, bar_seconds = detect_bar_times(music)
-        if bar_times:
-            durations, moved = snap_durations_to_bars(durations, bar_times, bar_seconds)
-            log(f"Beat-sync: snapped {moved}/{len(durations)} cuts onto bar boundaries "
-                f"(total {sum(durations):.2f}s vs shotlist {shotlist_total:.2f}s)")
-        else:
-            log("Beat-sync unavailable; using shotlist durations.")
+        bar_times, tempo, bar_seconds = build_bar_grid(
+            project_dir, music, music_duration)
+
+    # ---- Lyric sync: put each shot on the lyric it actually depicts ----
+    # This supersedes duration-snapping when it succeeds, because it decides
+    # both the order and the length of every shot from the vocal itself.  It
+    # still snaps its cuts to `bar_times`, so cuts keep landing on downbeats.
+    aligned = None
+    if use_lyric_sync and music and music_duration > 0:
+        try:
+            import lyric_sync
+            aligned = lyric_sync.plan(
+                project_dir, shots, music, music_duration, bar_times,
+                OUTPUTS_DIR / f"{project_name}_transcript.json",
+            )
+        except Exception as exc:
+            # Never let alignment take the animatic down with it.
+            logger.warning("Lyric sync failed (%s); falling back to beat sync.", exc)
+            aligned = None
+
+    if aligned:
+        shots, durations, _report = aligned
+    elif beat_sync and music and bar_times:
+        durations, moved = snap_durations_to_bars(durations, bar_times, bar_seconds)
+        log(f"Beat-sync: snapped {moved}/{len(durations)} cuts onto bar boundaries "
+            f"(total {sum(durations):.2f}s vs shotlist {shotlist_total:.2f}s)")
+    elif beat_sync and music:
+        log("Beat-sync unavailable; using shotlist durations.")
     elif beat_sync:
         log("Beat-sync requested but no music found; using shotlist durations.")
     else:
@@ -725,7 +794,11 @@ def main():
     parser = argparse.ArgumentParser(description="Create animatic from storyboards and audio")
     parser.add_argument("--project", required=True, help="Project name")
     parser.add_argument("--no-beat-sync", action="store_true",
-                        help="Ignore music tempo; use shotlist durations verbatim")
+                        help="Do not snap cuts onto musical bar boundaries. Combine "
+                             "with --no-lyric-sync for shotlist durations verbatim")
+    parser.add_argument("--no-lyric-sync", action="store_true",
+                        help="Do not transcribe the song to align shots with the "
+                             "lyric they depict; use shotlist durations instead")
     parser.add_argument("--no-motion", action="store_true",
                         help="Disable Ken Burns motion (plain slideshow)")
     parser.add_argument("--xfade", type=float, default=XFADE_DEFAULT,
@@ -746,6 +819,7 @@ def main():
         beat_sync=not args.no_beat_sync,
         xfade_duration=max(0.0, args.xfade),
         motion=not args.no_motion,
+        use_lyric_sync=not args.no_lyric_sync,
     )
 
 
