@@ -1,0 +1,9 @@
+{
+  "fps": 24,
+  "duration": 1.0,
+  "resolution": [640, 360],
+  "layers": [
+    {"name": "nothing", "image": "test_assets/empty.png", "z": 0, "anchor": [32,32],
+     "keyframes": [{"t": 0.0, "pos": [320,180]}, {"t": 1.0, "pos": [320,180]}]}
+  ]
+}

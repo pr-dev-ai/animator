@@ -1,5 +1,6 @@
 # Spike media + generated artifacts — never commit these.
 assets/
+test_assets/
 frames_A/
 frames_A_claude/
 frames_B/
