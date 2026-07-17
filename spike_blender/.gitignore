@@ -1,0 +1,9 @@
+# Spike media + generated artifacts — never commit these.
+assets/
+frames_A/
+frames_A_claude/
+frames_B/
+*.mp4
+smoke.png
+claude_spec_A.json
+claude_bpy_B.py
