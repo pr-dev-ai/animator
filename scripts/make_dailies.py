@@ -210,8 +210,14 @@ def centre_crop_169(width: int, height: int):
 
 
 def find_music(project_name: str):
-    """Locate the music bed for a project, if any."""
-    for suffix in ("_instrumental.wav", "_song.wav"):
+    """Locate the music bed for a project, if any.
+
+    Order matters: _song.wav is the finished article (instruments *and* sung
+    vocals), so it wins.  _instrumental.wav is the backing track alone and is
+    only a fallback for projects that have no song yet — preferring it would
+    silently drop the vocals from the animatic.
+    """
+    for suffix in ("_song.wav", "_instrumental.wav"):
         candidate = OUTPUTS_DIR / f"{project_name}{suffix}"
         if candidate.exists():
             return candidate
