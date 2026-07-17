@@ -508,6 +508,238 @@ def plan_scenes(
     return scenes
 
 
+# --------------------------------------------------------------------------- #
+# Per-scene camera/parallax motion, authored by Claude from the scene prompt.  #
+# --------------------------------------------------------------------------- #
+
+# The pan directions the depth-parallax renderer understands (scripts/
+# depth_parallax.py _DRIFT_DIRS).  "in"/"out" are pure push (dolly) moves with no
+# lateral pan; "hold" is an almost-static gentle shot.
+_MOTION_DIRECTIONS = (
+    "in", "out", "left", "right", "up", "down",
+    "up-left", "up-right", "down-left", "down-right", "hold",
+)
+
+# When Claude is unavailable or a scene has no prompt we fall back to the
+# renderer's tuned defaults: the rotating _DRIFTS palette (signalled by
+# drift=None) at near_pan_frac 0.11 (intensity 0.5) and push 0.05 (push 0.25).
+_DEFAULT_INTENSITY = 0.5
+_DEFAULT_PUSH = 0.25
+
+# Common phrasings Claude might emit, mapped onto a canonical direction.
+_DRIFT_ALIASES = {
+    "zoom in": "in", "push in": "in", "dolly in": "in", "forward": "in",
+    "zoom out": "out", "push out": "out", "pull back": "out", "dolly out": "out",
+    "back": "out", "backward": "out",
+    "pan left": "left", "pan right": "right",
+    "tilt up": "up", "pan up": "up", "tilt down": "down", "pan down": "down",
+    "static": "hold", "none": "hold", "still": "hold", "hold still": "hold",
+    "upleft": "up-left", "up left": "up-left", "leftup": "up-left",
+    "upright": "up-right", "up right": "up-right", "rightup": "up-right",
+    "downleft": "down-left", "down left": "down-left", "leftdown": "down-left",
+    "downright": "down-right", "down right": "down-right", "rightdown": "down-right",
+}
+
+
+def _fallback_motion(reason: str = "default rotating drift (Claude unavailable)") -> dict:
+    """The tuned-default motion: rotating palette drift, centred intensity/push.
+
+    drift=None tells the renderer to cycle its fixed _DRIFTS palette by the
+    shot's index, exactly as the general path did before Claude motion existed.
+    """
+    return {
+        "drift": None,
+        "intensity": _DEFAULT_INTENSITY,
+        "push": _DEFAULT_PUSH,
+        "reason": reason,
+    }
+
+
+def _coerce_drift(value):
+    """Map an arbitrary drift string onto a canonical _MOTION_DIRECTIONS entry.
+
+    Returns None (→ renderer default rotating drift) when the value is missing or
+    unrecognisable, so a stray Claude answer degrades to the tuned default rather
+    than a wrong hard direction.
+    """
+    if not isinstance(value, str):
+        return None
+    v = value.strip().lower().replace("_", "-")
+    if v in _MOTION_DIRECTIONS:
+        return v
+    if v in _DRIFT_ALIASES:
+        return _DRIFT_ALIASES[v]
+    # Last resort: match on whole WORDS (not substrings, so "maintain"/"rising"
+    # don't spuriously match "in"), longest direction first so "up-left" beats a
+    # bare "up".  A hyphenated direction also matches its spaced form ("up left").
+    words = set(re.split(r"[^a-z]+", v))
+    for d in sorted(_MOTION_DIRECTIONS, key=len, reverse=True):
+        if d in words:
+            return d
+        if "-" in d and d.replace("-", " ") in v:
+            return d
+    return None
+
+
+def _coerce_unit(value, fallback: float) -> float:
+    """Return *value* as a float clamped to [0, 1], else *fallback*."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if not math.isfinite(f):
+        return fallback
+    return max(0.0, min(1.0, f))
+
+
+def _normalize_motion(item) -> dict:
+    """Clean one Claude motion dict into {drift, intensity, push, reason}."""
+    if not isinstance(item, dict):
+        return _fallback_motion("unparseable motion entry")
+    return {
+        "drift": _coerce_drift(item.get("drift")),
+        "intensity": _coerce_unit(item.get("intensity"), _DEFAULT_INTENSITY),
+        "push": _coerce_unit(item.get("push"), _DEFAULT_PUSH),
+        "reason": str(item.get("reason", "")).strip(),
+    }
+
+
+_MOTION_SYSTEM_PROMPT = (
+    "You are the cinematographer for a children's animated music video. Each "
+    "scene is a single flat storyboard illustration that will be brought to life "
+    "with 2.5D depth parallax — the image is sliced into near/mid/far layers and "
+    "the virtual camera drifts, so foreground and background move at different "
+    "rates. Your job: read a scene's description and choose the ONE camera move "
+    "that best fits what is happening in it.\n\n"
+    "Motion vocabulary (pick exactly one 'drift' per scene):\n"
+    "  in         slow dolly/push toward the scene — good for wide establishing "
+    "shots settling into a place\n"
+    "  out        pull back / reveal — good for endings or opening up a space\n"
+    "  left,right lateral track — good for characters running, chasing, walking "
+    "across, or motion travelling sideways\n"
+    "  up         drift upward — good for things rising: flying up, climbing, "
+    "growing tall, looking to the sky\n"
+    "  down       drift downward — good for falling, landing, looking down, "
+    "settling\n"
+    "  up-left, up-right, down-left, down-right  diagonal drifts for combined "
+    "motion\n"
+    "  hold       almost static, gentle — good for a calm close-up of one "
+    "character singing\n\n"
+    "Also choose 'intensity' 0.0-1.0 (how far the camera travels: 0.1 barely "
+    "moving for a calm close-up, ~0.5 normal, 0.9 energetic for action/chase) and "
+    "'push' 0.0-1.0 (how much it also zooms: low for a held shot, moderate for an "
+    "establishing settle). Keep moves gentle overall — this is a soft kids video."
+)
+
+
+def _request_scene_motions(shots: list[dict]) -> dict:
+    """One Claude call returning {shot_id: motion} for every shot in *shots*.
+
+    Economical by design — the whole video is planned in a single request. Never
+    raises: any failure (API error, bad JSON, missing key) degrades that shot (or
+    all shots) to the tuned-default fallback motion.
+    """
+    client = _get_client()
+    lines = []
+    for s in shots:
+        dur = _coerce_duration(s.get("duration"), 4.0)
+        cam = str(s.get("camera", "")).strip() or "Medium"
+        lines.append(
+            {
+                "shot_id": str(s.get("shot_id", "")),
+                "camera": cam,
+                "duration": round(dur, 1),
+                "description": str(s.get("prompt", "")).strip(),
+            }
+        )
+    user_prompt = (
+        "Choose the camera motion for each of these scenes. For every scene "
+        "return an object with keys:\n"
+        '  "shot_id" (string, echo the input id),\n'
+        '  "drift" (string: one of in, out, left, right, up, down, up-left, '
+        "up-right, down-left, down-right, hold),\n"
+        '  "intensity" (number 0.0-1.0),\n'
+        '  "push" (number 0.0-1.0),\n'
+        '  "reason" (short string: why this move fits the scene).\n\n'
+        "Return ONLY a JSON array, one object per scene, no other text.\n\n"
+        f"Scenes:\n{json.dumps(lines, indent=2)}"
+    )
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2048,
+        system=_MOTION_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+    raw_text = _extract_text(response)
+    logger.debug("author_scene_motions raw response: %s", raw_text)
+    parsed = json.loads(_strip_fences(raw_text))
+    if not isinstance(parsed, list):
+        raise ValueError("expected a JSON array of motions")
+
+    by_id: dict[str, dict] = {}
+    for item in parsed:
+        if isinstance(item, dict) and str(item.get("shot_id", "")).strip():
+            by_id[str(item["shot_id"]).strip()] = _normalize_motion(item)
+    return by_id
+
+
+def author_scene_motions(shots: list[dict]) -> dict:
+    """Author the camera/parallax motion for a whole shot list in ONE Claude call.
+
+    Args:
+        shots: list of dicts, each with keys shot_id (str), prompt (str, the
+            scene's storyboard prompt/description), camera (str), duration
+            (float seconds).
+
+    Returns:
+        dict mapping each shot_id to a motion dict
+        {drift, intensity, push, reason} — see author_scene_motion. Every input
+        shot_id is present in the result; a shot Claude omitted (or the whole
+        call on failure) falls back to the renderer's tuned defaults.
+
+    Never raises — a failed/garbled Claude response degrades to sane defaults so
+    the animation build always proceeds.
+    """
+    result = {str(s.get("shot_id", "")): _fallback_motion() for s in shots}
+    usable = [s for s in shots if str(s.get("prompt", "")).strip()]
+    if not usable:
+        return result  # nothing to describe → all defaults
+
+    try:
+        check_api_key()
+        motions = _request_scene_motions(usable)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("author_scene_motions: Claude call failed (%s); using defaults", exc)
+        return result
+
+    for sid, motion in motions.items():
+        if sid in result:
+            result[sid] = motion
+    return result
+
+
+def author_scene_motion(prompt: str, camera: str, duration: float) -> dict:
+    """Let Claude choose the camera/parallax motion that fits ONE scene's prompt.
+
+    Reads the scene's storyboard description and returns motion params the
+    depth-parallax renderer understands:
+        {"drift": "in"|"out"|"left"|"right"|"up"|"down"|"up-left"|…|"hold"|None,
+         "intensity": 0.0-1.0, "push": 0.0-1.0, "reason": str}
+    where drift is the pan direction (None → renderer's default rotating drift),
+    intensity scales how far the near layer pans, and push the zoom amount.
+
+    Never raises: an empty prompt or any Claude failure returns the tuned-default
+    fallback motion instead of throwing.
+    """
+    if not prompt or not prompt.strip():
+        return _fallback_motion("no scene prompt — using default motion")
+    shot_id = "SH_ONE"
+    motions = author_scene_motions(
+        [{"shot_id": shot_id, "prompt": prompt, "camera": camera, "duration": duration}]
+    )
+    return motions.get(shot_id, _fallback_motion())
+
+
 def generate_storyboard_prompts(
     project_name: str, shotlist: list, style_guide: str, lyrics: str = ""
 ) -> list:

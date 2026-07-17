@@ -2,20 +2,24 @@
 animation_api.py — build the full-length animated music video for a project.
 
 `build_music_video(project)` is the single entry point a server route calls.  It
-renders the "Wheels on the Bus" video section by section (verse by verse) on the
-CPU via Blender, then concatenates the sections and muxes the project's song,
-writing outputs/<project>_animated.mp4.
+is GENERAL: any project that has its own storyboard images animates THOSE via
+depth-based 2.5D parallax (scripts/depth_parallax.py + scripts/blender_render.py),
+shot by shot on the CPU, then crossfades the shots and muxes the project's song,
+writing outputs/<project>_animated.mp4.  A project with no storyboard images gets
+a clear "generate storyboards first" error — there is no hardcoded scene.
 
-Why section by section:
-  * Each verse is a different action on the SAME reused bus scene kit, so the
-    spec author (scripts/build_bus_video.py) only varies the motion per section.
-  * Rendering in discrete, cached sections keeps any single render step short
-    (~1-3 min) and lets a re-invocation resume instead of restarting a ~25 min
-    job from zero — a section whose spec is unchanged and whose MP4 already
-    exists is skipped.
-  * The section MP4s share one encoder config, so they concatenate losslessly
-    (ffmpeg concat demuxer, -c copy) into exactly song-length video, giving tight
-    A/V sync at every cut.
+Per-scene motion is Claude-authored: each shot's storyboard prompt is read and
+Claude chooses the camera move (pan direction / intensity / push) that fits that
+scene (web_ui/claude_api.author_scene_motions), in a single batched call per
+build.  When Claude is unavailable, or a shot has no prompt, the renderer falls
+back to its tuned default rotating drift.
+
+Why shot by shot with a per-shot cache:
+  * Rendering in discrete, cached shots keeps any single render step short and
+    lets a re-invocation resume instead of restarting from zero — a shot whose
+    inputs are unchanged and whose MP4 already exists is skipped.
+  * Each shot renders exactly (slot + crossfade) long so the shots crossfade and
+    mux to precisely the song length, giving tight A/V sync.
 
 Yields plain progress log lines (server.py wraps these in SSE, exactly like
 music_ace.generate_song and the pipeline_api generators); the final line is
@@ -46,11 +50,6 @@ FPS = 24
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
-
-
-def _frame_count(section) -> int:
-    """Exact frame count for a section: span * fps (no +1 boundary duplicate)."""
-    return round((section["end"] - section["start"]) * FPS)
 
 
 def _render_frames(blender, spec_path, frames_dir) -> Generator[str, None, int]:
@@ -116,43 +115,66 @@ def _encode_section(ffmpeg, frames_dir, nframes, out_path) -> None:
         raise RuntimeError(f"section encode failed: {result.stderr[-800:]}")
 
 
-def _concat_and_mux(ffmpeg, section_mp4s, song, out_path, work_dir) -> None:
-    """Concat the section MP4s (lossless) and mux the song, into out_path.
-
-    Intermediates live in `work_dir` (the per-project build dir), not in the
-    shared outputs/ folder, so concurrent builds of different projects cannot
-    clobber each other's concat list, and they are always cleaned up.
-    """
-    listfile = work_dir / "_concat_list.txt"
-    concat = work_dir / "_concat_video.mp4"
-    try:
-        listfile.write_text(
-            "".join(f"file '{p.as_posix()}'\n" for p in section_mp4s), encoding="utf-8")
-        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-               "-f", "concat", "-safe", "0", "-i", str(listfile),
-               "-c", "copy", str(concat)]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            raise RuntimeError(f"concat failed: {r.stderr[-800:]}")
-
-        # Video length is authoritative; -shortest bounds the mux to it.  Video
-        # is exactly the song length, so nothing is truncated.
-        cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-               "-i", str(concat), "-i", str(song),
-               "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-               "-map", "0:v:0", "-map", "1:a:0", "-shortest",
-               "-movflags", "+faststart", str(out_path)]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            raise RuntimeError(f"mux failed: {r.stderr[-800:]}")
-    finally:
-        listfile.unlink(missing_ok=True)
-        concat.unlink(missing_ok=True)
-
-
 def _list_own_images(project):
     """The project's own storyboard PNGs, in filename order (SH010, SH020, ...)."""
     return sorted((OUTPUTS_DIR / f"{project}_storyboards").glob("*.png"))
+
+
+def _load_shot_prompts(project):
+    """Return {shot_id: (prompt, camera)} from the project's planned storyboard.
+
+    The storyboard prompt (projects/<p>/prompts/storyboards.json, keyed by
+    shot_id) is what Claude reads to author each scene's motion; the camera
+    (projects/<p>/shotlist.csv) gives it the framing.  Missing/unreadable files
+    just yield an empty map — the caller then falls back to default motion.
+    """
+    prompts = {}
+    sb = PROJECTS_DIR / project / "prompts" / "storyboards.json"
+    if sb.is_file():
+        try:
+            for item in json.loads(sb.read_text(encoding="utf-8")):
+                sid = str(item.get("shot_id", "")).strip()
+                if sid:
+                    prompts[sid] = str(item.get("prompt", "")).strip()
+        except (json.JSONDecodeError, OSError, AttributeError, TypeError):
+            prompts = {}
+
+    cameras = {}
+    shotlist = PROJECTS_DIR / project / "shotlist.csv"
+    if shotlist.is_file():
+        try:
+            import make_dailies as md
+            for s in md.read_shotlist(shotlist):
+                cameras[s["shot_id"]] = s.get("camera", "")
+        except Exception:                              # noqa: BLE001
+            cameras = {}
+
+    return {sid: (p, cameras.get(sid, "")) for sid, p in prompts.items()}
+
+
+# Claude returns intensity/push as 0..1; map them onto the depth-parallax
+# renderer's knobs.  near_pan_frac spans 0.06 (barely moving) .. 0.16 (lively),
+# centred on the tuned 0.11 at intensity 0.5.  push spans 0.02 .. 0.14, landing
+# on the tuned 0.05 at push 0.25.  An "out" drift pulls back (negative push).
+_PAN_MIN, _PAN_MAX = 0.06, 0.16
+_PUSH_MIN, _PUSH_MAX = 0.02, 0.14
+
+
+def _motion_to_render_kwargs(motion):
+    """Translate a Claude motion dict into depth_parallax.build_shot kwargs.
+
+    Returns {"drift", "near_pan_frac", "push"}.  drift=None keeps the renderer's
+    default rotating-palette behaviour (the tuned fallback).
+    """
+    intensity = motion.get("intensity", 0.5)
+    push_unit = motion.get("push", 0.25)
+    drift = motion.get("drift")
+    near_pan_frac = _PAN_MIN + (_PAN_MAX - _PAN_MIN) * intensity
+    push = _PUSH_MIN + (_PUSH_MAX - _PUSH_MIN) * push_unit
+    if drift == "out":                                 # pull-back = negative zoom
+        push = -push
+    return {"drift": drift, "near_pan_frac": round(near_pan_frac, 4),
+            "push": round(push, 4)}
 
 
 def _plan_own_shots(project, song_duration):
@@ -218,10 +240,9 @@ def _build_from_own_images(project, song, n_images) -> Generator[str, None, None
     short crossfade and the project's song is muxed on, writing
     outputs/<project>_animated.mp4.
 
-    Rendered section-by-section with a per-shot cache (same design as the bus
-    showcase path), so a re-invocation resumes instead of restarting, and no
-    single render step runs long.  Yields progress lines; the final line is
-    "DONE" or starts with "ERROR:".
+    Rendered shot-by-shot with a per-shot cache, so a re-invocation resumes
+    instead of restarting, and no single render step runs long.  Yields progress
+    lines; the final line is "DONE" or starts with "ERROR:".
     """
     import blender_render
     import depth_parallax
@@ -261,6 +282,44 @@ def _build_from_own_images(project, song, n_images) -> Generator[str, None, None
     assets_dir = build_dir / "assets"
     build_dir.mkdir(parents=True, exist_ok=True)
 
+    # Claude authors each scene's motion from its storyboard prompt — ONE batched
+    # call for the whole video (never a per-shot loop, to keep the cost a single
+    # request).  Shots with a prompt get a Claude-chosen drift/intensity/push;
+    # shots with none (or if Claude is unavailable) keep the tuned default
+    # rotating drift.  Failure here never blocks the render.
+    shot_prompts = _load_shot_prompts(project)
+    motions = {}
+    described = [
+        {"shot_id": sid, "prompt": shot_prompts[sid][0],
+         "camera": shot_prompts[sid][1], "slot": slot}
+        for sid, _img, slot in plan
+        if sid in shot_prompts and shot_prompts[sid][0]
+    ]
+    if described:
+        try:
+            try:
+                from web_ui import claude_api
+            except ImportError:
+                import claude_api            # when web_ui is itself on sys.path
+            motions = claude_api.author_scene_motions(
+                [{"shot_id": d["shot_id"], "prompt": d["prompt"],
+                  "camera": d["camera"], "duration": d["slot"]} for d in described]
+            )
+            yield (f"Claude authored per-scene motion for {len(described)} shots "
+                   f"(1 API call).")
+            for d in described:
+                m = motions.get(d["shot_id"], {})
+                yield (f"    {d['shot_id']}: drift={m.get('drift') or 'default'} "
+                       f"intensity={m.get('intensity', 0.5):.2f} "
+                       f"push={m.get('push', 0.25):.2f}"
+                       + (f" — {m.get('reason')}" if m.get('reason') else ""))
+        except Exception as exc:                       # noqa: BLE001
+            yield (f"    (per-scene motion authoring unavailable: {exc}; "
+                   f"using default drift)")
+            motions = {}
+    else:
+        yield "    (no storyboard prompts found — using default rotating drift)"
+
     slots = [s for _, _, s in plan]
     # Crossfade must stay shorter than the shortest shot (else xfade offsets
     # overlap and ffmpeg produces garbage); cap at 0.4x the shortest slot.
@@ -273,11 +332,15 @@ def _build_from_own_images(project, song, n_images) -> Generator[str, None, None
         # consumed without stealing screen time (see make_dailies.assemble math).
         render_dur = slot + xfade
         nframes = round(render_dur * FPS)
-        drift = idx - 1                            # cycle camera drift per shot
+        drift_idx = idx - 1                         # default rotating drift index
+        # Claude-authored motion for this shot, if any; else tuned defaults.
+        kw = _motion_to_render_kwargs(motions[sid]) if sid in motions else {}
         mp4_path = build_dir / f"{sid}.mp4"
         hash_path = build_dir / f"{sid}.hash"
+        motion_sig = (f"{kw.get('drift')}|{kw.get('near_pan_frac')}|"
+                      f"{kw.get('push')}")
         want_hash = _sha(f"{img.name}|{img.stat().st_mtime_ns}|{render_dur:.4f}|"
-                         f"{drift}|{FPS}|v1")
+                         f"{drift_idx}|{motion_sig}|{FPS}|v2")
 
         if (mp4_path.is_file() and hash_path.is_file()
                 and hash_path.read_text().strip() == want_hash):
@@ -285,11 +348,11 @@ def _build_from_own_images(project, song, n_images) -> Generator[str, None, None
             clips.append(mp4_path)
             continue
 
-        yield (f"[{idx}/{len(plan)}] {sid} ({slot:.1f}s) — depth + parallax, "
-               f"{nframes} frames")
+        yield (f"[{idx}/{len(plan)}] {sid} ({slot:.1f}s) — depth + parallax "
+               f"(drift={kw.get('drift') or 'default'}), {nframes} frames")
         try:
             spec_path = depth_parallax.build_shot(
-                img, assets_dir, render_dur, drift_index=drift, fps=FPS)
+                img, assets_dir, render_dur, drift_index=drift_idx, fps=FPS, **kw)
         except Exception as exc:                   # noqa: BLE001
             yield f"ERROR: depth/layer build failed for {sid}: {exc}"
             return
@@ -336,126 +399,41 @@ def _build_from_own_images(project, song, n_images) -> Generator[str, None, None
 
 
 def build_music_video(project: str) -> Generator[str, None, None]:
-    """Build outputs/<project>_animated.mp4 — the full-length bus music video.
+    """Build outputs/<project>_animated.mp4 — the project's animated music video.
 
-    Reads the project's song (outputs/<project>_song.wav) and the shared bus
-    scene kit (outputs/scene_kit_bus), authors one render spec per verse-section,
-    renders each on the CPU via Blender (cached), then concatenates and muxes the
-    song.  Yields progress lines; the final line is "DONE" or starts with
-    "ERROR:".
+    General, depth-parallax path: reads the project's song
+    (outputs/<project>_song.wav) and its own storyboard images
+    (outputs/<project>_storyboards/*.png), authors Claude-driven per-scene motion,
+    renders each shot with depth-based 2.5D parallax on the CPU (cached), then
+    crossfades the shots and muxes the song.  A project with no storyboard images
+    gets a clear "generate storyboards first" error — there is no hardcoded scene.
+    Yields progress lines; the final line is "DONE" or starts with "ERROR:".
     """
     if not _VALID_PROJECT_NAME.fullmatch(project or ""):
         yield f"ERROR: invalid project name {project!r}"
         return
 
     song = OUTPUTS_DIR / f"{project}_song.wav"
-    kit = OUTPUTS_DIR / "scene_kit_bus"
     if not song.is_file():
         yield f"ERROR: no song at {song} — generate the song first"
         return
 
-    # The bus scene kit is a hand-built SHOWCASE for one specific scene — it is
-    # NOT a template for arbitrary projects.  Any project that has its own
-    # storyboard images must animate THOSE, not the bus.  Only a project with no
-    # images of its own (the bus showcase) falls back to the bus kit.
-    own_images = sorted((OUTPUTS_DIR / f"{project}_storyboards").glob("*.png"))
-    if own_images:
-        yield from _build_from_own_images(project, song, len(own_images))
-        return
-    if not (kit / "manifest.json").is_file():
-        yield (f"ERROR: project '{project}' has no storyboard images to animate "
-               f"(generate storyboards first), and the bus showcase kit is missing.")
+    own_images = _list_own_images(project)
+    if not own_images:
+        yield (f"ERROR: project '{project}' has no storyboard images to animate — "
+               f"generate storyboards first "
+               f"(expected outputs/{project}_storyboards/*.png).")
         return
 
-    import build_bus_video as bbv
-    import beat_timing
-    import blender_render
-
-    blender = blender_render.resolve_blender()
-    if not blender:
-        yield "ERROR: Blender not found (install BlenderFoundation.Blender)"
-        return
-    ffmpeg = blender_render.resolve_ffmpeg()
-    try:
-        subprocess.run([ffmpeg, "-version"], capture_output=True, check=True)
-    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-        yield "ERROR: ffmpeg not found (install Gyan.FFmpeg)"
-        return
-
-    sections = bbv.plan_sections()
-    total = sum(s["end"] - s["start"] for s in sections)
-    yield f"Music video: {len(sections)} verse-sections, {total:.0f}s @ {FPS}fps (CPU render)"
-
-    # One shared beat grid for the whole song (eighth notes), sliced per section.
-    yield "Deriving the beat grid from the song..."
-    beats = beat_timing.beat_grid(project, subdiv=2, audio_duration=total)
-    if not beats:
-        yield "  (no beat grid available — motion will still play, just not beat-locked)"
-
-    build_dir = OUTPUTS_DIR / "_bus_build" / project
-    build_dir.mkdir(parents=True, exist_ok=True)
-    overlays = bbv.ensure_overlay_assets(OUTPUTS_DIR / "_bus_build")
-
-    section_mp4s = []
-    for idx, sec in enumerate(sections, 1):
-        name = sec["name"]
-        span = sec["end"] - sec["start"]
-        nframes = _frame_count(sec)
-        spec = bbv.build_section_spec(sec, beats, overlays)
-        spec_json = json.dumps(spec, indent=2)
-        spec_path = build_dir / f"{name}.json"
-        mp4_path = build_dir / f"{name}.mp4"
-        hash_path = build_dir / f"{name}.hash"
-        want_hash = _sha(spec_json)
-
-        # Resume: skip a section whose spec is unchanged and MP4 already present.
-        if (mp4_path.is_file() and hash_path.is_file()
-                and hash_path.read_text().strip() == want_hash):
-            yield (f"[{idx}/{len(sections)}] {name} ({sec['start']:.0f}-{sec['end']:.0f}s, "
-                   f"{sec['action']}) — cached, skipping")
-            section_mp4s.append(mp4_path)
-            continue
-
-        spec_path.write_text(spec_json, encoding="utf-8")
-        yield (f"[{idx}/{len(sections)}] {name} ({sec['start']:.0f}-{sec['end']:.0f}s, "
-               f"{sec['action']}) — rendering {nframes} frames")
-
-        frames_dir = build_dir / f"frames_{name}"
-        rc = yield from _render_frames(blender, spec_path, frames_dir)
-        if rc != 0:
-            shutil.rmtree(frames_dir, ignore_errors=True)
-            yield (f"ERROR: Blender exited {rc} on section '{name}' — render failed "
-                   f"or the silent-failure guard tripped. No video written.")
-            return
-        try:
-            _encode_section(ffmpeg, frames_dir, nframes, mp4_path)
-        except RuntimeError as exc:
-            yield f"ERROR: {exc}"
-            return
-        finally:
-            shutil.rmtree(frames_dir, ignore_errors=True)   # reclaim disk
-        hash_path.write_text(want_hash, encoding="utf-8")
-        section_mp4s.append(mp4_path)
-        yield f"    section '{name}' encoded ({nframes} frames = {span:.1f}s)"
-
-    out_path = OUTPUTS_DIR / f"{project}_animated.mp4"
-    yield f"Concatenating {len(section_mp4s)} sections and muxing the song..."
-    try:
-        _concat_and_mux(ffmpeg, section_mp4s, song, out_path, build_dir)
-    except RuntimeError as exc:
-        yield f"ERROR: {exc}"
-        return
-
-    size_mb = out_path.stat().st_size / (1024 * 1024)
-    yield f"Wrote {out_path} ({size_mb:.1f} MB, {total:.0f}s, {FPS}fps, video+audio)"
-    yield "DONE"
+    yield from _build_from_own_images(project, song, len(own_images))
 
 
 if __name__ == "__main__":
     import argparse
 
-    p = argparse.ArgumentParser(description="Build the full-length bus music video.")
-    p.add_argument("--project", default="wheels_hero")
+    p = argparse.ArgumentParser(
+        description="Build a project's animated music video (depth parallax).")
+    p.add_argument("--project", required=True)
     args = p.parse_args()
     for line in build_music_video(args.project):
         print(line, flush=True)

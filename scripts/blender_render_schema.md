@@ -6,8 +6,8 @@ positions are in **canvas pixel coordinates**: origin top-left, x right, y
 **down** (ordinary image coordinates). The executor converts to Blender units;
 the spec author never touches Blender.
 
-> v2 adds **layer parenting** (§ Parenting) so a wheel can stay mounted on a bus
-> and spin independently. Everything from v1 is unchanged and still valid.
+> v2 adds **layer parenting** (§ Parenting) so a rotor can stay mounted on a
+> windmill and spin independently. Everything from v1 is unchanged and still valid.
 
 ```jsonc
 {
@@ -60,8 +60,8 @@ scale = 1 at the first keyframe).
 
 Add `"parent": "<layer name>"` to make a layer a **child** of another. The child
 rides along with the parent's position, rotation and scale, while keeping its own
-independent motion on top. This is what makes "wheels on the bus" work: the bus
-drives across and its wheels ride along, each wheel also spinning.
+independent motion on top. For example a windmill can drift across the frame while
+its rotor rides along and also spins about its own hub.
 
 **Exact semantics** — read carefully, this is the fiddly part to author:
 
@@ -73,7 +73,7 @@ drives across and its wheels ride along, each wheel also spinning.
   130 px below the parent anchor **at rest**; the parent's own rotation/scale
   then carry that offset around.
 - **`rot` is the child's OWN spin**, about its own anchor, composed on top of any
-  rotation inherited from the parent. A wheel with `anchor` at its geometric
+  rotation inherited from the parent. A rotor with `anchor` at its geometric
   centre spins cleanly in place (no wobble).
 - **`scale`** multiplies the parent's scale.
 - **`z` stays an absolute paint order.** A child with `z: 3` renders at depth 3
@@ -86,19 +86,19 @@ The offset is measured against the parent's **rest pose** (its transform at
 relative to the parent, in the parent's local frame.
 
 ```jsonc
-// A bus that drives left->right with two wheels mounted under it, each spinning
-// 3 full turns. The wheels' pos never changes (constant offset) yet they ride
-// along, because the parent bus is what translates.
+// A windmill that drifts left->right while its rotor, mounted on the hub, spins
+// 3 full turns. The rotor's pos never changes (constant offset) yet it rides
+// along, because the parent windmill is what translates.
 {
-  "name": "bus",  "z": 2, "anchor": [260, 120], "image": "bus.png",
+  "name": "windmill",  "z": 2, "anchor": [260, 120], "image": "windmill.png",
   "keyframes": [
     {"t": 0.0, "pos": [300, 470], "easing": "ease_in_out"},
     {"t": 4.0, "pos": [860, 470]}
   ]
 },
 {
-  "name": "wheel_front", "z": 3, "anchor": [80, 80], "image": "wheel.png",
-  "parent": "bus",
+  "name": "rotor", "z": 3, "anchor": [80, 80], "image": "rotor.png",
+  "parent": "windmill",
   "keyframes": [
     {"t": 0.0, "pos": [140, 130], "rot": 0},
     {"t": 4.0, "pos": [140, 130], "rot": 1080}

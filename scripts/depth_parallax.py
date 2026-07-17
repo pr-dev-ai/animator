@@ -244,14 +244,54 @@ def build_layers(image: Image.Image, depth: np.ndarray, out_dir: Path,
 # A small palette of camera drifts, cycled per shot so the motion never looks
 # mechanical.  Each is a unit direction (dx, dy) for the NEAR layer's travel;
 # farther layers travel a fraction of it.  Kept gentle — big moves tear soft
-# depth and blow past the overscan margin.
+# depth and blow past the overscan margin.  Canvas coords are y-DOWN (origin
+# top-left), so a NEGATIVE dy drifts the scene visually UP.
 _DRIFTS = [
     (1.0, 0.0), (-1.0, 0.0), (0.7, 0.5), (-0.7, 0.5),
     (0.0, 1.0), (0.8, -0.4), (-0.8, -0.4), (0.5, 0.8),
 ]
 
+# Named drift directions Claude can request per scene.  Same y-down convention:
+# "up" is dy < 0 so the frame drifts upward on screen.  "in"/"out" carry no
+# lateral pan — they are pure push (zoom) moves; the caller supplies a positive
+# push for "in" and a negative one for "out".
+_DRIFT_DIRS = {
+    "left": (-1.0, 0.0),
+    "right": (1.0, 0.0),
+    "up": (0.0, -1.0),
+    "down": (0.0, 1.0),
+    "up-left": (-0.7, -0.7),
+    "up-right": (0.7, -0.7),
+    "down-left": (-0.7, 0.7),
+    "down-right": (0.7, 0.7),
+    "in": (0.0, 0.0),
+    "out": (0.0, 0.0),
+    "hold": (0.0, 0.0),
+}
 
-def author_shot_spec(layers, duration, canvas, drift_index=0,
+
+def resolve_drift(drift, drift_index=0):
+    """Resolve a drift request to a unit (dx, dy) direction.
+
+    `drift` may be a named direction (one of _DRIFT_DIRS, e.g. "up", "left",
+    "in"), an explicit (dx, dy) pair, or None.  When it is None or unrecognised,
+    fall back to the rotating _DRIFTS palette indexed by `drift_index` (the
+    original per-shot cycling behaviour), so the general path keeps working when
+    Claude is unavailable or a shot has no prompt.
+    """
+    if isinstance(drift, str):
+        key = drift.strip().lower()
+        if key in _DRIFT_DIRS:
+            return _DRIFT_DIRS[key]
+    elif isinstance(drift, (tuple, list)) and len(drift) == 2:
+        try:
+            return (float(drift[0]), float(drift[1]))
+        except (TypeError, ValueError):
+            pass
+    return _DRIFTS[drift_index % len(_DRIFTS)]
+
+
+def author_shot_spec(layers, duration, canvas, drift_index=0, drift=None,
                      near_pan_frac=0.11, overscan=1.22, push=0.05, fps=24):
     # near_pan_frac tuned up from 0.055: at 0.055 the near/far differential
     # measured only ~2px (imperceptible — read as a flat pan/zoom).  0.11 gives a
@@ -267,14 +307,25 @@ def author_shot_spec(layers, duration, canvas, drift_index=0,
     of that) in the shot's drift direction.  A slight shared `push` (zoom) adds
     life on top without touching the parallax.
 
+    `drift` chooses the pan direction: a named direction ("up", "left", "in", …),
+    an explicit (dx, dy), or None to cycle the fixed `_DRIFTS` palette by
+    `drift_index` (the default general-path behaviour).  `near_pan_frac` scales
+    how far the near layer travels (motion intensity) and `push` the zoom amount;
+    a negative `push` pulls back (used for an "out" drift).  A zero-length drift
+    ("in"/"out"/"hold") pans nothing, leaving a pure push/hold.
+
     Returns a spec dict ready for scripts/blender_render.py.
     """
     W, H = canvas
     cx, cy = W / 2.0, H / 2.0
-    dx, dy = _DRIFTS[drift_index % len(_DRIFTS)]
+    dx, dy = resolve_drift(drift, drift_index)
     # Normalise the drift so diagonal moves aren't longer than axis-aligned ones.
-    mag = max(1e-6, (dx * dx + dy * dy) ** 0.5)
-    dx, dy = dx / mag, dy / mag
+    # A zero-length drift stays zero (pure push / hold, no pan).
+    mag = (dx * dx + dy * dy) ** 0.5
+    if mag < 1e-6:
+        dx, dy = 0.0, 0.0
+    else:
+        dx, dy = dx / mag, dy / mag
     max_pan = near_pan_frac * W
 
     n = len(layers)
@@ -320,13 +371,18 @@ def author_shot_spec(layers, duration, canvas, drift_index=0,
 # Convenience: one call from image -> spec.json on disk                         #
 # --------------------------------------------------------------------------- #
 
-def build_shot(image_path, work_dir, duration, drift_index=0, n_bands=3,
-               fps=24, canvas=None):
+def build_shot(image_path, work_dir, duration, drift_index=0, drift=None,
+               near_pan_frac=0.11, push=0.05, n_bands=3, fps=24, canvas=None):
     """Full per-shot build: depth -> layers -> spec.json.  Returns the spec path.
 
     Layer PNGs and the spec land in `work_dir`.  `canvas` defaults to the image's
     own pixel size.  Depth is cached (keyed on the image bytes) so a re-run with
     an unchanged image skips re-inference.
+
+    `drift`/`near_pan_frac`/`push` are passed straight to author_shot_spec so a
+    caller (e.g. Claude-authored per-scene motion) can steer the pan direction,
+    intensity, and zoom.  When `drift` is None the fixed `_DRIFTS` palette is
+    cycled by `drift_index`, preserving the original default motion.
     """
     image_path = Path(image_path)
     work_dir = Path(work_dir)
@@ -353,6 +409,7 @@ def build_shot(image_path, work_dir, duration, drift_index=0, n_bands=3,
 
     layers = build_layers(img, depth, work_dir, stem, n_bands=n_bands)
     spec = author_shot_spec(layers, duration, (W, H), drift_index=drift_index,
+                            drift=drift, near_pan_frac=near_pan_frac, push=push,
                             fps=fps)
     import json
     spec_path = work_dir / f"{stem}_spec.json"
@@ -371,7 +428,14 @@ def main():
     p.add_argument("--out", default=None, help="work dir (default: alongside image)")
     p.add_argument("--duration", type=float, default=4.0)
     p.add_argument("--bands", type=int, default=3)
-    p.add_argument("--drift", type=int, default=0)
+    p.add_argument("--drift", type=int, default=0,
+                   help="index into the rotating _DRIFTS palette")
+    p.add_argument("--dir", default=None,
+                   help="named drift direction (up/down/left/right/in/out/…); "
+                        "overrides --drift when given")
+    p.add_argument("--intensity", type=float, default=0.11,
+                   help="near-layer pan fraction (motion intensity)")
+    p.add_argument("--push", type=float, default=0.05, help="zoom/push amount")
     p.add_argument("--depth-preview", action="store_true",
                    help="also write <stem>_depthmap.png")
     args = p.parse_args()
@@ -385,7 +449,9 @@ def main():
         _save_depth_preview(depth, work_dir / f"{image_path.stem}_depthmap.png")
         log(f"wrote depth preview -> {work_dir / (image_path.stem + '_depthmap.png')}")
     spec = build_shot(image_path, work_dir, args.duration,
-                      drift_index=args.drift, n_bands=args.bands)
+                      drift_index=args.drift, drift=args.dir,
+                      near_pan_frac=args.intensity, push=args.push,
+                      n_bands=args.bands)
     log(f"spec -> {spec}")
 
 
