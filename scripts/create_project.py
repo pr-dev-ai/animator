@@ -74,6 +74,13 @@ CHARACTER: "Example dialogue or song lyric."
 
 
 def _kids_shotlist_csv() -> str:
+    # Minimal placeholder only. The real scene list is decided dynamically by
+    # Claude's scene planner (web_ui.claude_api.plan_scenes) when storyboard
+    # prompts are generated: it reads the song's lyrics and chooses how many
+    # scenes the video needs, then overwrites this file. These 3 generic rows
+    # exist purely so a brand-new project is valid before any lyrics are written;
+    # is_default_shotlist() recognises them as "untouched" and lets the planner
+    # replace them without clobbering a user's hand-edited shotlist.
     return (
         "shot_id,description,camera,duration,notes\n"
         "SH010,Opening title card,Wide,3.0,Bright colours with title\n"
