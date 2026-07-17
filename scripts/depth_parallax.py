@@ -252,7 +252,12 @@ _DRIFTS = [
 
 
 def author_shot_spec(layers, duration, canvas, drift_index=0,
-                     near_pan_frac=0.055, overscan=1.14, push=0.05, fps=24):
+                     near_pan_frac=0.11, overscan=1.22, push=0.05, fps=24):
+    # near_pan_frac tuned up from 0.055: at 0.055 the near/far differential
+    # measured only ~2px (imperceptible — read as a flat pan/zoom).  0.11 gives a
+    # clearly-visible ~25px differential; 0.18 is dramatic (~48px) but the
+    # inpaint seams around foreground cutouts start to ghost on approximate
+    # cartoon depth.  0.11 + overscan 1.22 is the balance: alive, minimal seams.
     """Author a `blender_render` spec whose layers parallax-pan over the shot.
 
     `layers` is the FAR->NEAR list from build_layers().  Every layer is a
