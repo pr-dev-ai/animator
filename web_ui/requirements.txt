@@ -5,6 +5,11 @@ numpy>=1.24.0
 # Beat detection for beat-synced animatic cuts (scripts/make_dailies.py).
 # Optional: make_dailies degrades to shotlist durations if it is absent.
 librosa>=0.10.0
+# Word-level song transcription, so animatic shots land on the lyric they
+# depict (scripts/lyric_sync.py).  Runs on CPU; the GPU stays free for image
+# and music generation.  Optional: make_dailies falls back to beat-synced
+# shotlist durations if it is absent.
+faster-whisper>=1.0.0
 # WAV I/O for ACE-Step song generation (web_ui/music_ace.py).
 soundfile>=0.12.0
 gunicorn>=21.0.0
