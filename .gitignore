@@ -26,6 +26,10 @@ models/*.safetensors
 models/*.ckpt
 models/*.pt
 models/*.pth
+# ACE-Step 1.5 split files (~10 GB) — weights live on disk, never in git
+models/diffusion_models/
+models/text_encoders/
+models/vae/
 
 # Piper voice models (large files)
 piper/*.onnx
