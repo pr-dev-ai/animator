@@ -9,662 +9,330 @@
 <body>
 <div id="app">
 
-  <!-- ================================================
+  <!-- ============================================================
        TOP BAR
-       ================================================ -->
+       ============================================================ -->
   <header id="topbar" role="banner">
     <div class="brand">
-      <span class="brand-icon" aria-hidden="true">🎬</span>
-      <span class="brand-text">Kids Animation Studio</span>
+      <span class="brand-mark" aria-hidden="true">🎬</span>
+      <span class="brand-text">Kids Animation <b>Studio</b></span>
     </div>
-    <div class="topbar-right">
-      <label for="project-select">Project:</label>
-      <select id="project-select" aria-label="Select active project">
-        <option value="">— choose project —</option>
-      </select>
+
+    <div class="topbar-center">
+      <div class="proj-picker">
+        <label for="project-select" class="visually-hidden">Active project</label>
+        <select id="project-select" aria-label="Active project">
+          <option value="">— choose project —</option>
+        </select>
+        <button id="new-project-btn" class="btn btn-ghost btn-sm" type="button">
+          <span aria-hidden="true">＋</span> New Project
+        </button>
+      </div>
+
+      <div class="services" aria-label="Service status">
+        <span class="service" id="svc-comfyui" title="ComfyUI image/audio backend">
+          <span class="svc-dot offline" id="dot-comfyui" aria-hidden="true"></span>ComfyUI
+        </span>
+        <span class="service" id="svc-gpu" title="Local GPU">
+          <span class="svc-dot offline" id="dot-gpu" aria-hidden="true"></span>GPU
+        </span>
+      </div>
     </div>
+
+    <button id="final-video-btn" class="final-video dim" type="button"
+            aria-label="Jump to the final video" disabled>
+      <span aria-hidden="true">🎞️</span>
+      <span class="fv-label">Final Video</span>
+    </button>
   </header>
 
-  <!-- ================================================
-       BODY ROW
-       ================================================ -->
-  <div id="body-row">
+  <!-- ============================================================
+       STUDIO WORKSPACE
+       ============================================================ -->
+  <div id="studio">
 
-    <!-- ============================================
-         SIDEBAR
-         ============================================ -->
-    <nav id="sidebar" aria-label="Main navigation">
-      <ul class="sidebar-nav" role="tablist" aria-orientation="vertical">
-
-        <li id="nav-project"
-            class="nav-item active"
-            role="tab"
-            aria-selected="true"
-            aria-controls="panel-project"
-            data-tab="project"
-            tabindex="0">
-          <span class="nav-number" aria-hidden="true">1</span>
-          <span class="nav-icon" aria-hidden="true">📁</span>
-          <span class="nav-label">Project</span>
-        </li>
-
-        <li id="nav-lyrics"
-            class="nav-item"
-            role="tab"
-            aria-selected="false"
-            aria-controls="panel-lyrics"
-            data-tab="lyrics"
-            tabindex="-1">
-          <span class="nav-number" aria-hidden="true">2</span>
-          <span class="nav-icon" aria-hidden="true">🎵</span>
-          <span class="nav-label">Lyrics</span>
-        </li>
-
-        <li id="nav-storyboard"
-            class="nav-item"
-            role="tab"
-            aria-selected="false"
-            aria-controls="panel-storyboard"
-            data-tab="storyboard"
-            tabindex="-1">
-          <span class="nav-number" aria-hidden="true">3</span>
-          <span class="nav-icon" aria-hidden="true">🖼️</span>
-          <span class="nav-label">Storyboard</span>
-        </li>
-
-        <li id="nav-audio"
-            class="nav-item"
-            role="tab"
-            aria-selected="false"
-            aria-controls="panel-audio"
-            data-tab="audio"
-            tabindex="-1">
-          <span class="nav-number" aria-hidden="true">4</span>
-          <span class="nav-icon" aria-hidden="true">🎤</span>
-          <span class="nav-label">Audio</span>
-        </li>
-
-        <li id="nav-video"
-            class="nav-item"
-            role="tab"
-            aria-selected="false"
-            aria-controls="panel-video"
-            data-tab="video"
-            tabindex="-1">
-          <span class="nav-number" aria-hidden="true">5</span>
-          <span class="nav-icon" aria-hidden="true">🎥</span>
-          <span class="nav-label">Video</span>
-        </li>
-
-      </ul>
-
-      <!-- Service status -->
-      <div class="sidebar-status" aria-label="Service status">
-        <div class="sidebar-status-title">Services</div>
-
-        <div class="status-indicator" id="status-comfyui">
-          <span class="status-dot offline" aria-hidden="true" id="dot-comfyui"></span>
-          <span>ComfyUI</span>
-        </div>
-
-        <div class="status-indicator" id="status-pipeline">
-          <span class="status-dot online" aria-hidden="true" id="dot-pipeline"></span>
-          <span>Pipeline</span>
-        </div>
+    <!-- ── LEFT RAIL — PIPELINE STEPPER ──────────────────────── -->
+    <nav id="rail" aria-label="Creative pipeline">
+      <button id="rail-collapse" class="rail-collapse" type="button"
+              aria-label="Collapse pipeline rail">‹</button>
+      <ol class="stepper" id="stepper" role="list"></ol>
+      <div class="rail-foot">
+        <p class="rail-hint">Each stage unlocks the next.<br>Green means done — click to revisit.</p>
       </div>
-    </nav><!-- /#sidebar -->
+    </nav>
 
-    <!-- ============================================
-         MAIN CONTENT
-         ============================================ -->
-    <main id="content" aria-label="Content area">
+    <!-- ── CENTER — ACTIVE STAGE ─────────────────────────────── -->
+    <main id="stage" aria-label="Active stage">
 
-      <!-- ==========================================
-           TAB 1: PROJECT
-           ========================================== -->
-      <section id="panel-project"
-               class="tab-panel active"
-               role="tabpanel"
-               aria-labelledby="nav-project"
-               tabindex="-1">
-        <h1 class="panel-title">Project Setup</h1>
-        <p class="panel-subtitle">Create a new animation project or select an existing one.</p>
+      <!-- ============= PROJECT ============= -->
+      <section class="stage-panel active" data-stage="project" aria-label="Project">
+        <div class="stage-head">
+          <h1><span class="stage-emoji">📁</span> Project</h1>
+          <p class="stage-sub">Start a new music video, or pick up where you left off.</p>
+        </div>
 
-        <div class="card">
-          <div class="card-title">
-            <span class="card-title-icon" aria-hidden="true">✨</span>
-            Create New Project
-          </div>
-
-          <form id="create-project-form">
-            <div class="form-group">
-              <label for="project-name">Project Name</label>
-              <input
-                type="text"
-                id="project-name"
-                class="form-control"
-                placeholder="my_animation"
-                pattern="[A-Za-z0-9_-]+"
-                autocomplete="off"
-                spellcheck="false"
-                aria-describedby="project-name-hint" />
-              <p id="project-name-hint" class="section-note">
-                Letters, numbers, hyphens, and underscores only.
-              </p>
+        <div class="cols">
+          <div class="card create-card">
+            <h2 class="card-h">Create a project</h2>
+            <div class="field">
+              <label for="project-name">Name</label>
+              <input id="project-name" class="input" type="text" placeholder="wheels_on_the_bus"
+                     pattern="[A-Za-z0-9_-]+" autocomplete="off" spellcheck="false" />
+              <p class="hint">Letters, numbers, hyphens and underscores only.</p>
             </div>
-
-            <div class="form-group">
+            <div class="field">
               <label for="project-type">Type</label>
-              <select id="project-type" class="form-control">
-                <option value="kids">Kids</option>
+              <select id="project-type" class="input">
+                <option value="kids">Kids song</option>
                 <option value="story">Story</option>
               </select>
             </div>
-
-            <button type="submit"
-                    id="create-project-btn"
-                    class="btn btn-accent">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-icon" aria-hidden="true">📁</span>
-              Create Project
+            <button id="create-project-btn" class="btn btn-accent" type="button">
+              <span aria-hidden="true">✨</span> Create Project
             </button>
-          </form>
-        </div><!-- /.card -->
-
-        <div class="card">
-          <div class="card-title">
-            <span class="card-title-icon" aria-hidden="true">📋</span>
-            Your Projects
           </div>
 
-          <ul id="project-list" class="project-list-items" aria-live="polite">
-            <li class="projects-empty">No projects yet. Create one above to get started.</li>
-          </ul>
+          <div class="card">
+            <h2 class="card-h">Your projects</h2>
+            <div id="project-grid" class="project-grid" aria-live="polite">
+              <p class="empty">No projects yet — create one to begin.</p>
+            </div>
+          </div>
         </div>
+      </section>
 
-        <div id="project-hint" class="info-card" role="note">
-          <span class="info-icon" aria-hidden="true">💡</span>
-          <span class="hint-text">Click a project above to select it, then use the sidebar to navigate to Lyrics, Storyboard, Audio, or Video.</span>
+      <!-- ============= LYRICS ============= -->
+      <section class="stage-panel" data-stage="lyrics" aria-label="Lyrics">
+        <div class="stage-head">
+          <h1><span class="stage-emoji">✍️</span> Lyrics</h1>
+          <p class="stage-sub">Write the song with Claude, then tweak every line.</p>
         </div>
-
-      </section><!-- /#panel-project -->
-
-      <!-- ==========================================
-           TAB 2: LYRICS & MUSIC
-           ========================================== -->
-      <section id="panel-lyrics"
-               class="tab-panel"
-               role="tabpanel"
-               aria-labelledby="nav-lyrics"
-               tabindex="-1">
-        <h1 class="panel-title">Lyrics &amp; Music</h1>
-        <p class="panel-subtitle">Generate song lyrics and chord suggestions with Claude AI.</p>
 
         <div class="card">
-          <div class="card-title">
-            <span class="card-title-icon" aria-hidden="true">🤖</span>
-            Generate Lyrics
-          </div>
-
-          <form id="lyrics-form">
-            <div class="form-group">
+          <h2 class="card-h">Generate lyrics</h2>
+          <div class="grid-2">
+            <div class="field">
               <label for="lyrics-theme">Theme</label>
-              <input
-                type="text"
-                id="lyrics-theme"
-                class="form-control"
-                placeholder="Animals at the farm"
-                list="theme-suggestions"
-                autocomplete="off" />
+              <input id="lyrics-theme" class="input" type="text"
+                     placeholder="Wheels on the bus" list="theme-suggestions" autocomplete="off" />
               <datalist id="theme-suggestions">
-                <option value="Animals at the farm">
-                <option value="Jungle adventure">
-                <option value="Under the sea">
-                <option value="Dinosaurs">
-                <option value="Space and planets">
-                <option value="Friendship and kindness">
-                <option value="Counting and numbers">
-                <option value="Colors of the rainbow">
-                <option value="Seasons and weather">
-                <option value="Superheroes">
-                <option value="Bedtime and dreams">
-                <option value="Healthy food and vegetables">
-                <option value="Dance and movement">
-                <option value="Birds and butterflies">
-                <option value="Festival and celebration">
-                <option value="Family love">
-                <option value="Train and vehicles">
-                <option value="Magic and fairies">
-                <option value="Sharing and helping">
-                <option value="Morning routine">
+                <option value="Wheels on the bus"></option>
+                <option value="Animals at the farm"></option>
+                <option value="Under the sea"></option>
+                <option value="Counting to ten"></option>
+                <option value="Colors of the rainbow"></option>
+                <option value="Twinkle twinkle little star"></option>
+                <option value="A day at the park"></option>
+                <option value="Bedtime and dreams"></option>
               </datalist>
             </div>
-
-            <div class="form-group">
+            <div class="field">
               <label for="lyrics-language">Language</label>
-              <select id="lyrics-language" class="form-control">
+              <select id="lyrics-language" class="input">
                 <option value="English">English</option>
                 <option value="Hindi">Hindi</option>
-                <option value="Spanish">Spanish</option>
-                <option value="French">French</option>
-                <option value="German">German</option>
-                <option value="Japanese">Japanese</option>
-                <option value="Mandarin Chinese">Mandarin Chinese</option>
               </select>
+              <p class="hint">Only English &amp; Hindi are verified end-to-end.</p>
             </div>
-
-            <div class="form-group">
+            <div class="field">
               <label for="lyrics-style">Style</label>
-              <select id="lyrics-style" class="form-control">
-                <option value="nursery_rhyme">Nursery Rhyme</option>
-                <option value="pop">Pop</option>
+              <select id="lyrics-style" class="input">
+                <option value="nursery rhyme">Nursery rhyme</option>
+                <option value="upbeat pop">Upbeat pop</option>
                 <option value="folk">Folk</option>
-                <option value="hip_hop">Hip Hop</option>
                 <option value="lullaby">Lullaby</option>
               </select>
             </div>
-
-            <div class="form-group">
-              <label for="lyrics-verses">Number of Verses</label>
-              <input
-                type="number"
-                id="lyrics-verses"
-                class="form-control"
-                min="2"
-                max="6"
-                value="3"
-                aria-describedby="verses-hint" />
-              <p id="verses-hint" class="section-note">Choose between 2 and 6 verses.</p>
+            <div class="field">
+              <label for="lyrics-verses">Verses</label>
+              <input id="lyrics-verses" class="input" type="number" min="1" max="6" value="3" />
             </div>
-
-            <button type="submit"
-                    id="generate-lyrics-btn"
-                    class="btn btn-accent">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-icon" aria-hidden="true">🤖</span>
-              Generate Lyrics with Claude
-            </button>
-          </form>
+          </div>
+          <button id="generate-lyrics-btn" class="btn btn-accent" type="button">
+            <span aria-hidden="true">🤖</span> Generate Lyrics with Claude
+          </button>
         </div>
 
-        <!-- Lyrics result (hidden until generated) -->
-        <div id="lyrics-result">
-          <div class="card">
-            <div class="card-title">
-              <span class="card-title-icon" aria-hidden="true">📝</span>
-              Lyrics
+        <div class="card" id="lyrics-editor-card" hidden>
+          <div class="card-h-row">
+            <h2 class="card-h">Lyrics</h2>
+            <div class="card-h-actions">
+              <button id="save-lyrics-btn" class="btn btn-ghost btn-sm" type="button">💾 Save</button>
+              <button id="copy-lyrics-btn" class="btn btn-ghost btn-sm" type="button">📋 Copy</button>
             </div>
-            <div class="form-group">
-              <label for="lyrics-textarea">Edit lyrics below:</label>
-              <textarea
-                id="lyrics-textarea"
-                class="form-control"
-                rows="12"
-                aria-label="Generated lyrics (editable)"></textarea>
-            </div>
-            <div class="btn-row">
-              <button type="button"
-                      id="copy-lyrics-btn"
-                      class="btn btn-secondary">
-                <span aria-hidden="true">📋</span>
-                Copy Lyrics
+          </div>
+          <textarea id="lyrics-textarea" class="input textarea" rows="12"
+                    aria-label="Editable lyrics"></textarea>
+          <p class="hint" id="lyrics-save-note">Edits auto-save when you click away.</p>
+
+          <div class="subcard">
+            <div class="card-h-row">
+              <h3 class="card-h sm">Chords &amp; tempo</h3>
+              <button id="generate-chords-btn" class="btn btn-ghost btn-sm" type="button">
+                🎸 Generate Chords
               </button>
             </div>
+            <pre id="chords-pre" class="chords" hidden></pre>
           </div>
+        </div>
+      </section>
 
-          <!-- Chords section -->
-          <div id="chords-section">
-            <div class="card">
-              <div class="card-title">
-                <span class="card-title-icon" aria-hidden="true">🎸</span>
-                Chord Suggestions
-              </div>
-
-              <div class="btn-row mb-2">
-                <button type="button"
-                        id="generate-chords-btn"
-                        class="btn btn-secondary">
-                  <span class="btn-spinner" aria-hidden="true"></span>
-                  <span class="btn-icon" aria-hidden="true">🎸</span>
-                  Generate Chord Suggestions
-                </button>
-              </div>
-
-              <div id="chords-display" class="hidden">
-                <pre id="chords-pre" class="chord-display" aria-label="Chord suggestions"></pre>
-                <div class="btn-row mt-1">
-                  <button type="button"
-                          id="copy-chords-btn"
-                          class="btn btn-secondary btn-sm">
-                    <span aria-hidden="true">📋</span>
-                    Copy Chords
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div><!-- /#chords-section -->
-        </div><!-- /#lyrics-result -->
-
-      </section><!-- /#panel-lyrics -->
-
-      <!-- ==========================================
-           TAB 3: STORYBOARDS
-           ========================================== -->
-      <section id="panel-storyboard"
-               class="tab-panel"
-               role="tabpanel"
-               aria-labelledby="nav-storyboard"
-               tabindex="-1">
-        <h1 class="panel-title">Storyboards</h1>
-        <p class="panel-subtitle">Generate image prompts, then create your storyboard images in ComfyUI.</p>
-
-        <div class="info-card" role="note">
-          <span class="info-icon" aria-hidden="true">ℹ️</span>
-          <span>
-            First, generate storyboard prompts with Claude. Then open ComfyUI to generate
-            the images from those prompts.
-          </span>
+      <!-- ============= MUSIC ============= -->
+      <section class="stage-panel" data-stage="music" aria-label="Music">
+        <div class="stage-head">
+          <h1><span class="stage-emoji">🎵</span> Music</h1>
+          <p class="stage-sub">Turn the lyrics into a real song — sung, on-device.</p>
         </div>
 
         <div class="card">
-          <div class="btn-row mb-2">
-            <button type="button"
-                    id="generate-prompts-btn"
-                    class="btn btn-accent">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-icon" aria-hidden="true">🤖</span>
-              Generate Prompts with Claude
+          <div id="music-lyrics-state" class="statebar">
+            <span class="statebar-dot"></span>
+            <span id="music-lyrics-label">Checking lyrics…</span>
+          </div>
+
+          <div class="cta-block">
+            <button id="generate-song-btn" class="btn btn-accent btn-big" type="button">
+              <span aria-hidden="true">🎤</span> Generate Song (with sung vocals)
             </button>
-            <span class="text-muted" id="prompts-project-note" style="font-size:12px;">
-              (requires a project to be selected)
-            </span>
+            <p class="note-warn">
+              ⏱ Takes about <b>3 minutes</b> and restarts the ComfyUI worker first
+              (a RAM-leak safeguard) — the log below streams progress the whole time.
+            </p>
+            <p class="hint">
+              Local AI vocals — English works well; Hindi is supported. The song follows
+              the language you chose for the lyrics.
+            </p>
           </div>
 
-          <!-- Editable prompt cards (hidden until generated) -->
-          <div id="prompts-list" aria-live="polite"></div>
-        </div>
-
-        <div class="divider-label">Generate images via ComfyUI API or open manually:</div>
-
-        <div class="btn-row mb-2">
-          <button type="button"
-                  id="generate-images-btn"
-                  class="btn btn-accent">
-            <span class="btn-spinner" aria-hidden="true"></span>
-            <span class="btn-icon" aria-hidden="true">🎨</span>
-            Generate All Images
-          </button>
-          <a href="http://localhost:8188"
-             target="_blank"
-             rel="noopener noreferrer"
-             class="btn btn-secondary"
-             aria-label="Open ComfyUI manually in a new tab">
-            <span aria-hidden="true">🖥️</span>
-            Open ComfyUI →
-          </a>
-        </div>
-
-        <pre id="generate-images-log"
-             class="log-panel"
-             role="log"
-             aria-label="Image generation log"
-             aria-live="polite"></pre>
-
-        <div class="card">
-          <div class="card-title">
-            <span class="card-title-icon" aria-hidden="true">🖼️</span>
-            Image Gallery
-          </div>
-          <div class="btn-row mb-2">
-            <button type="button"
-                    id="refresh-gallery-btn"
-                    class="btn btn-secondary btn-sm">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-icon" aria-hidden="true">🔄</span>
-              Refresh Gallery
-            </button>
-          </div>
-          <div id="image-gallery" class="image-gallery" aria-label="Storyboard image gallery" aria-live="polite">
-            <p class="gallery-empty">No images yet. Generate prompts and run ComfyUI to create storyboard images.</p>
+          <div id="song-player" class="player" hidden>
+            <div class="player-title">🎶 Your song</div>
+            <audio id="song-audio" controls preload="none"></audio>
+            <a id="song-download" class="btn btn-ghost btn-sm" download>⬇ Download WAV</a>
           </div>
         </div>
+      </section>
 
-      </section><!-- /#panel-storyboard -->
-
-      <!-- ==========================================
-           TAB 4: AUDIO
-           ========================================== -->
-      <section id="panel-audio"
-               class="tab-panel"
-               role="tabpanel"
-               aria-labelledby="nav-audio"
-               tabindex="-1">
-        <h1 class="panel-title">Audio &amp; Lip Sync</h1>
-        <p class="panel-subtitle">Generate instrumental music, record your vocals, then mix into a song.</p>
-
-        <!-- ── BACKGROUND MUSIC ─────────────────────────────────────── -->
-        <div class="card">
-          <div class="card-title">
-            <span class="card-title-icon" aria-hidden="true">🎵</span>
-            Background Instrumental
-          </div>
-          <p class="section-note">
-            Uses your saved chords &amp; lyrics to synthesise a full instrumental track.
-            Generate chords in the Lyrics tab first.
-          </p>
-          <div class="btn-row mb-2">
-            <button type="button" id="gen-instrumental-btn" class="btn btn-accent">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-icon" aria-hidden="true">🎹</span>
-              Generate Instrumental
-            </button>
-          </div>
-          <pre id="instrumental-log" class="log-panel" role="log" aria-live="polite"></pre>
-          <div id="instrumental-player" style="display:none" class="audio-player-row">
-            <audio id="instrumental-audio" controls style="width:100%"></audio>
-            <a id="instrumental-download" class="btn btn-secondary btn-sm" download>
-              ⬇ Download WAV
-            </a>
-          </div>
-        </div>
-
-        <!-- ── VOCAL RECORDING ──────────────────────────────────────── -->
-        <div class="card">
-          <div class="card-title">
-            <span class="card-title-icon" aria-hidden="true">🎤</span>
-            Your Vocal Recording
-          </div>
-          <p class="section-note">
-            Record your vocals in <strong>Audacity</strong> (or any DAW), export as WAV, then upload here.
-          </p>
-          <div class="form-group">
-            <label for="vocal-file-input">Choose WAV file</label>
-            <input type="file" id="vocal-file-input" accept=".wav,audio/wav" class="form-control" />
-          </div>
-          <div class="btn-row mb-2">
-            <button type="button" id="upload-vocals-btn" class="btn btn-accent">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-icon" aria-hidden="true">⬆</span>
-              Upload Vocals
-            </button>
-            <span id="vocals-status" class="section-note"></span>
-          </div>
-          <div id="vocal-player" style="display:none" class="audio-player-row">
-            <audio id="vocal-audio" controls style="width:100%"></audio>
-          </div>
-        </div>
-
-        <!-- ── MIX FINAL SONG ───────────────────────────────────────── -->
-        <div class="card">
-          <div class="card-title">
-            <span class="card-title-icon" aria-hidden="true">🎚️</span>
-            Mix Final Song
-          </div>
-          <p class="section-note">Combine instrumental + vocals into one WAV file.</p>
-          <div class="form-group">
-            <label for="mix-ivol">Instrumental volume: <span id="mix-ivol-label">70%</span></label>
-            <input type="range" id="mix-ivol" min="0" max="100" value="70" class="form-control" />
-          </div>
-          <div class="form-group">
-            <label for="mix-vvol">Vocals volume: <span id="mix-vvol-label">100%</span></label>
-            <input type="range" id="mix-vvol" min="0" max="100" value="100" class="form-control" />
-          </div>
-          <div class="btn-row mb-2">
-            <button type="button" id="mix-song-btn" class="btn btn-accent">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-icon" aria-hidden="true">🎶</span>
-              Mix Tracks
-            </button>
-          </div>
-          <div id="song-player" style="display:none" class="audio-player-row">
-            <audio id="song-audio" controls style="width:100%"></audio>
-            <a id="song-download" class="btn btn-secondary btn-sm" download>
-              ⬇ Download Final Song
-            </a>
-          </div>
-        </div>
-
-        <div class="divider-label">Shot lip-sync audio (per-shot WAV files for animation)</div>
-
-        <div class="card" style="margin-top:12px">
-          <div class="btn-row mb-2">
-            <button type="button"
-                    id="refresh-shots-btn"
-                    class="btn btn-secondary btn-sm">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-icon" aria-hidden="true">🔄</span>
-              Refresh Shot List
-            </button>
-          </div>
-
-          <div class="shots-table-wrapper" role="region" aria-label="Shot list">
-            <table class="shots-table" aria-label="Shots and audio upload">
-              <thead>
-                <tr>
-                  <th scope="col">Shot ID</th>
-                  <th scope="col">Description</th>
-                  <th scope="col">Duration</th>
-                  <th scope="col">Audio Upload</th>
-                  <th scope="col">Status</th>
-                </tr>
-              </thead>
-              <tbody id="shots-tbody" aria-live="polite">
-                <tr class="table-empty-row">
-                  <td colspan="5">
-                    Select a project and refresh to see shots.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="btn-row mb-1">
-          <button type="button"
-                  id="run-lipsync-btn"
-                  class="btn btn-accent">
-            <span class="btn-spinner" aria-hidden="true"></span>
-            <span class="btn-icon" aria-hidden="true">👄</span>
-            Run Lip-Sync for All Shots
-          </button>
-        </div>
-
-        <pre id="lipsync-log"
-             class="log-panel"
-             role="log"
-             aria-label="Lip-sync processing log"
-             aria-live="polite"></pre>
-
-      </section><!-- /#panel-audio -->
-
-      <!-- ==========================================
-           TAB 5: VIDEO
-           ========================================== -->
-      <section id="panel-video"
-               class="tab-panel"
-               role="tabpanel"
-               aria-labelledby="nav-video"
-               tabindex="-1">
-        <h1 class="panel-title">Video &amp; Animatic</h1>
-        <p class="panel-subtitle">Assemble all storyboards and audio into a finished animatic video.</p>
-
-        <div class="info-card" role="note">
-          <span class="info-icon" aria-hidden="true">ℹ️</span>
-          <span>
-            Build your animatic by assembling all storyboards and audio into a video.
-            Make sure all shots have images and audio before building.
-          </span>
+      <!-- ============= STORYBOARD ============= -->
+      <section class="stage-panel" data-stage="storyboard" aria-label="Storyboard">
+        <div class="stage-head">
+          <h1><span class="stage-emoji">🖼️</span> Storyboard</h1>
+          <p class="stage-sub">Draft a shot prompt for every scene, then paint them all.</p>
         </div>
 
         <div class="card">
-          <div class="btn-row mb-1">
-            <button type="button"
-                    id="build-animatic-btn"
-                    class="btn btn-accent">
-              <span class="btn-spinner" aria-hidden="true"></span>
-              <span class="btn-icon" aria-hidden="true">🎬</span>
-              Build Animatic
+          <div class="btn-row">
+            <button id="generate-prompts-btn" class="btn btn-accent" type="button">
+              <span aria-hidden="true">🤖</span> Generate Prompts with Claude
+            </button>
+            <button id="generate-images-btn" class="btn btn-accent" type="button">
+              <span aria-hidden="true">🎨</span> Generate All Images
+            </button>
+            <a href="http://localhost:8188" target="_blank" rel="noopener noreferrer"
+               class="btn btn-ghost btn-sm">Open ComfyUI ↗</a>
+          </div>
+          <div id="prompts-list" class="prompts-list" aria-live="polite" hidden></div>
+        </div>
+
+        <div class="card">
+          <div class="card-h-row">
+            <h2 class="card-h">Gallery <span id="gallery-count" class="count-badge" hidden></span></h2>
+            <button id="refresh-gallery-btn" class="btn btn-ghost btn-sm" type="button">🔄 Refresh</button>
+          </div>
+          <div id="gallery" class="gallery" aria-live="polite">
+            <p class="empty">No images yet — generate prompts, then images.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============= ANIMATE ============= -->
+      <section class="stage-panel" data-stage="animate" aria-label="Animate">
+        <div class="stage-head">
+          <h1><span class="stage-emoji">🎬</span> Animate</h1>
+          <p class="stage-sub">Bring the hero scene to life with 2.5D motion.</p>
+        </div>
+
+        <div class="card">
+          <div class="cta-block">
+            <button id="build-animation-btn" class="btn btn-accent btn-big" type="button">
+              <span aria-hidden="true">🎬</span> Build Animation
+            </button>
+            <p class="hint">
+              2.5D animation — currently best for the bus / wheels hero scene. Progress
+              streams into the activity log below.
+            </p>
+          </div>
+
+          <div id="animation-player" class="player" hidden>
+            <div class="player-title">▶️ Animated result</div>
+            <video id="animation-video" controls preload="none"></video>
+            <a id="animation-download" class="btn btn-ghost btn-sm" download>⬇ Download MP4</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============= VIDEO ============= -->
+      <section class="stage-panel" data-stage="video" aria-label="Final video">
+        <div class="stage-head">
+          <h1><span class="stage-emoji">🎞️</span> Final Video</h1>
+          <p class="stage-sub">Mux images and song into the finished music video.</p>
+        </div>
+
+        <div class="card">
+          <div class="btn-row">
+            <button id="build-video-btn" class="btn btn-accent" type="button">
+              <span aria-hidden="true">🎬</span> Build Final Video
             </button>
           </div>
 
-          <pre id="animatic-log"
-               class="log-panel"
-               role="log"
-               aria-label="Animatic build log"
-               aria-live="polite"></pre>
-        </div>
-
-        <div id="video-player-section" aria-live="polite">
-          <div class="card">
-            <div class="card-title">
-              <span class="card-title-icon" aria-hidden="true">▶️</span>
-              Animatic Preview
-            </div>
-            <video id="animatic-video"
-                   controls
-                   aria-label="Animatic preview video">
-              Your browser does not support the video element.
-            </video>
-            <div class="btn-row mt-2">
-              <a id="download-video-btn"
-                 href="#"
-                 download
-                 class="btn btn-secondary">
-                <span aria-hidden="true">⬇️</span>
-                Download Video
-              </a>
-            </div>
+          <div id="final-player" class="player" hidden>
+            <div class="player-title" id="final-player-title">▶️ Final music video</div>
+            <video id="final-video" controls preload="none"></video>
+            <a id="final-download" class="btn btn-ghost btn-sm" download>⬇ Download MP4</a>
           </div>
+          <p id="final-empty" class="empty">No video yet — build it once your storyboard is ready.</p>
         </div>
 
-      </section><!-- /#panel-video -->
+        <div class="card">
+          <h2 class="card-h">Project summary</h2>
+          <ul id="summary-list" class="summary" aria-live="polite"></ul>
+        </div>
+      </section>
 
-    </main><!-- /#content -->
-  </div><!-- /#body-row -->
+    </main>
+  </div><!-- /#studio -->
+
+  <!-- ============================================================
+       BOTTOM — PERSISTENT MEDIA BAR + ACTIVITY DRAWER
+       ============================================================ -->
+  <footer id="mediabar" aria-label="Media and activity">
+    <div id="activity-drawer" class="activity-drawer" hidden>
+      <div class="activity-head">
+        <span class="activity-title">Activity log</span>
+        <button id="clear-log-btn" class="btn btn-ghost btn-xs" type="button">Clear</button>
+      </div>
+      <pre id="activity-log" class="activity-log" role="log" aria-live="polite" aria-label="Activity log"></pre>
+    </div>
+
+    <div class="mediabar-row">
+      <div class="mb-now">
+        <span class="mb-icon" aria-hidden="true">🎧</span>
+        <span id="mb-title" class="mb-title">Nothing loaded</span>
+      </div>
+      <audio id="mb-audio" class="mb-audio" controls preload="none" hidden></audio>
+      <div class="mb-actions">
+        <button id="mb-video-btn" class="btn btn-ghost btn-sm" type="button" hidden>🎞️ Video</button>
+        <button id="activity-toggle" class="btn btn-ghost btn-sm" type="button" aria-expanded="false">
+          <span class="live-dot" id="activity-live" hidden></span> Activity ▲
+        </button>
+      </div>
+    </div>
+  </footer>
+
 </div><!-- /#app -->
 
-<!-- ================================================
-     SCREEN READER LIVE ANNOUNCER
-     Always in DOM so screen readers register it.
-     app.js sets textContent to announce dynamic events.
-     ================================================ -->
-<div id="sr-announcer"
-     role="status"
-     aria-live="polite"
-     aria-atomic="true"
-     class="sr-only"></div>
+<div id="sr-announcer" role="status" aria-live="polite" aria-atomic="true" class="visually-hidden"></div>
+<div id="toast-container" role="region" aria-label="Notifications" aria-live="polite"></div>
 
-<!-- ================================================
-     TOAST NOTIFICATION CONTAINER
-     ================================================ -->
-<div id="toast-container"
-     aria-live="polite"
-     aria-atomic="false"
-     role="region"
-     aria-label="Notifications"></div>
-
-<script src="/static/app.js" defer></script>
+<script src="/static/app.js" type="module"></script>
 </body>
 </html>
