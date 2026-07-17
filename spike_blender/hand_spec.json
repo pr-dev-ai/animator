@@ -1,0 +1,54 @@
+{
+  "fps": 24,
+  "duration": 5.0,
+  "resolution": [1152, 768],
+  "layers": [
+    {
+      "name": "bg",
+      "image": "assets/bg.png",
+      "z": 0,
+      "anchor": [576, 384],
+      "keyframes": [
+        {"t": 0.0, "pos": [576, 384], "rot": 0, "scale": 1.0}
+      ]
+    },
+    {
+      "name": "bus",
+      "image": "assets/bus.png",
+      "z": 1,
+      "anchor": [528, 338],
+      "keyframes": [
+        {"t": 0.0, "pos": [230, 430], "rot": 0, "scale": 0.5, "easing": "ease_out"},
+        {"t": 0.5, "pos": [300, 414], "rot": 0, "scale": 0.5, "easing": "ease_in_out"},
+        {"t": 1.0, "pos": [370, 430], "rot": 0, "scale": 0.5, "easing": "ease_in_out"},
+        {"t": 1.5, "pos": [440, 414], "rot": 0, "scale": 0.5, "easing": "ease_in_out"},
+        {"t": 2.0, "pos": [510, 430], "rot": 0, "scale": 0.5, "easing": "ease_in_out"},
+        {"t": 2.5, "pos": [580, 414], "rot": 0, "scale": 0.5, "easing": "ease_in_out"},
+        {"t": 3.0, "pos": [650, 430], "rot": 0, "scale": 0.5, "easing": "ease_in_out"},
+        {"t": 3.5, "pos": [720, 414], "rot": 0, "scale": 0.5, "easing": "ease_in_out"},
+        {"t": 4.0, "pos": [790, 430], "rot": 0, "scale": 0.5, "easing": "ease_in_out"},
+        {"t": 4.5, "pos": [860, 414], "rot": 0, "scale": 0.5, "easing": "ease_in_out"},
+        {"t": 5.0, "pos": [920, 430], "rot": 0, "scale": 0.5, "easing": "linear"}
+      ]
+    },
+    {
+      "name": "wheel",
+      "image": "assets/wheel.png",
+      "z": 2,
+      "anchor": [118, 118],
+      "keyframes": [
+        {"t": 0.0, "pos": [240, 529], "rot": 0, "scale": 0.5, "easing": "linear"},
+        {"t": 0.5, "pos": [310, 513], "rot": 180, "scale": 0.5, "easing": "linear"},
+        {"t": 1.0, "pos": [380, 529], "rot": 360, "scale": 0.5, "easing": "linear"},
+        {"t": 1.5, "pos": [450, 513], "rot": 540, "scale": 0.5, "easing": "linear"},
+        {"t": 2.0, "pos": [520, 529], "rot": 720, "scale": 0.5, "easing": "linear"},
+        {"t": 2.5, "pos": [590, 513], "rot": 900, "scale": 0.5, "easing": "linear"},
+        {"t": 3.0, "pos": [660, 529], "rot": 1080, "scale": 0.5, "easing": "linear"},
+        {"t": 3.5, "pos": [730, 513], "rot": 1260, "scale": 0.5, "easing": "linear"},
+        {"t": 4.0, "pos": [800, 529], "rot": 1440, "scale": 0.5, "easing": "linear"},
+        {"t": 4.5, "pos": [870, 513], "rot": 1620, "scale": 0.5, "easing": "linear"},
+        {"t": 5.0, "pos": [930, 529], "rot": 1800, "scale": 0.5, "easing": "linear"}
+      ]
+    }
+  ]
+}
