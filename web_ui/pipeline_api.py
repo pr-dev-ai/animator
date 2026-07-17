@@ -228,9 +228,34 @@ def import_audio(project: str, shot_id: str, character: str, wav_bytes: bytes) -
     return {"path": str(relative_path)}
 
 
+# Art checkpoints preferred for children's-book / nursery-rhyme illustration,
+# best first. Matched case-insensitively as a substring of the filename.
+# v1-5-pruned-emaonly is a research BASE model, not an art model: it is the
+# last-resort fallback only, hence its absence from this list.
+_CHECKPOINT_PREFERENCE = (
+    "childrensstories_v1toonanime",
+    "childrensstories",
+    "dreamshaper",
+)
+
+# Stock SD1.5 VAE renders muddy; this finetune restores contrast and detail.
+_VAE_PREFERENCE = ("vae-ft-mse-840000-ema-pruned",)
+
+
+def _rank(name: str, preference: tuple[str, ...]) -> int:
+    """Index of the first matching preference entry, or len(preference) if none."""
+    lowered = name.lower()
+    for i, wanted in enumerate(preference):
+        if wanted in lowered:
+            return i
+    return len(preference)
+
+
 def _find_checkpoint() -> str:
     """Return the best available checkpoint name known to ComfyUI.
 
+    Picks by explicit art-model preference (_CHECKPOINT_PREFERENCE) rather than
+    alphabetical order, so the SD1.5 base model is only ever a last resort.
     Prefers .safetensors over .ckpt but skips zero-byte (corrupt/incomplete)
     files. Falls back to scanning the local models/checkpoints directory if
     ComfyUI is not yet responding.
@@ -246,6 +271,10 @@ def _find_checkpoint() -> str:
         except OSError:
             return True  # can't check from host — assume OK
 
+    def _sort_key(name: str) -> tuple:
+        # 1. named art-model preference, 2. .safetensors over .ckpt, 3. stable by name
+        return (_rank(name, _CHECKPOINT_PREFERENCE), not name.endswith(".safetensors"), name)
+
     try:
         with urllib.request.urlopen(
             f"{COMFYUI_URL}/object_info/CheckpointLoaderSimple", timeout=4
@@ -254,18 +283,18 @@ def _find_checkpoint() -> str:
             models: list[str] = data["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
             valid = [m for m in models if _is_valid(m)]
             if valid:
-                safetensors = [m for m in valid if m.endswith(".safetensors")]
-                return safetensors[0] if safetensors else valid[0]
+                return sorted(valid, key=_sort_key)[0]
     except Exception:
         pass
 
     if checkpoints_dir.exists():
-        st = [p for p in sorted(checkpoints_dir.glob("*.safetensors")) if p.stat().st_size > 0]
-        if st:
-            return st[0].name
-        ckpts = [p for p in sorted(checkpoints_dir.glob("*.ckpt")) if p.stat().st_size > 0]
-        if ckpts:
-            return ckpts[0].name
+        local = [
+            p.name
+            for p in checkpoints_dir.iterdir()
+            if p.suffix in (".safetensors", ".ckpt") and p.stat().st_size > 0
+        ]
+        if local:
+            return sorted(local, key=_sort_key)[0]
 
     raise ValueError(
         "No checkpoint model found in models/checkpoints/. "
@@ -273,30 +302,106 @@ def _find_checkpoint() -> str:
     )
 
 
-def _comfyui_workflow(prompt: str, negative: str, shot_id: str, checkpoint: str) -> dict:
-    """Minimal SD 1.5 text-to-image workflow for the ComfyUI API."""
-    return {
+def _find_vae() -> str | None:
+    """Return the preferred standalone VAE name, or None to use the checkpoint's own.
+
+    Returning None is a normal outcome, not an error: every checkpoint ships a
+    baked-in VAE, so the workflow stays valid when no better VAE is installed.
+    """
+    try:
+        with urllib.request.urlopen(f"{COMFYUI_URL}/object_info/VAELoader", timeout=4) as resp:
+            data = json.loads(resp.read())
+            vaes: list[str] = data["VAELoader"]["input"]["required"]["vae_name"][0]
+    except Exception:
+        return None
+
+    preferred = [v for v in vaes if _rank(v, _VAE_PREFERENCE) < len(_VAE_PREFERENCE)]
+    if not preferred:
+        return None
+    # Sort by rank, not ComfyUI's list order, so the first _VAE_PREFERENCE entry
+    # really does win when several preferred VAEs are installed.
+    return min(preferred, key=lambda v: _rank(v, _VAE_PREFERENCE))
+
+
+# Base render. 768x512 keeps one axis at SD1.5's native 512 — pushing both axes
+# past 512 makes SD1.5 duplicate subjects (two heads, two buses).
+_BASE_WIDTH, _BASE_HEIGHT = 768, 512
+# Hires fix: re-sample an upscaled latent at partial denoise. This is the single
+# biggest quality gain available here, and 1.5x fits in 6GB VRAM.
+_HIRES_WIDTH, _HIRES_HEIGHT = 1152, 768
+_HIRES_DENOISE = 0.45  # high enough to add detail, low enough to keep composition
+# Sampler tuning. 15 steps (the previous value) is genuinely undercooked; 28 is
+# where SD1.5 stops gaining. The hires pass only refines, so it needs far fewer.
+_BASE_STEPS = 28
+_HIRES_STEPS = 12
+_CFG = 7.0
+
+
+def _comfyui_workflow(
+    prompt: str,
+    negative: str,
+    shot_id: str,
+    checkpoint: str,
+    vae: str | None = None,
+    seed: int | None = None,
+) -> dict:
+    """SD 1.5 text-to-image workflow (clip skip 2 + hires fix) for the ComfyUI API.
+
+    When *vae* is None the checkpoint's built-in VAE is used.
+    When *seed* is None a random one is drawn. The same seed drives both the base
+    and the hires pass (as in a standard hires fix), so logging it is enough to
+    reproduce the image.
+    """
+    if seed is None:
+        seed = random.randint(0, 2 ** 32 - 1)
+
+    workflow = {
         "1": {"class_type": "CheckpointLoaderSimple",
               "inputs": {"ckpt_name": checkpoint}},
+        # Clip skip 2: standard for cartoon/anime finetunes, which are trained
+        # with it. Using the final layer (the default) is a large part of why
+        # output looked flat.
+        "8": {"class_type": "CLIPSetLastLayer",
+              "inputs": {"clip": ["1", 1], "stop_at_clip_layer": -2}},
         "2": {"class_type": "CLIPTextEncode",
-              "inputs": {"clip": ["1", 1], "text": prompt}},
+              "inputs": {"clip": ["8", 0], "text": prompt}},
         "3": {"class_type": "CLIPTextEncode",
-              "inputs": {"clip": ["1", 1], "text": negative}},
+              "inputs": {"clip": ["8", 0], "text": negative}},
         "4": {"class_type": "EmptyLatentImage",
-              "inputs": {"width": 512, "height": 512, "batch_size": 1}},
+              "inputs": {"width": _BASE_WIDTH, "height": _BASE_HEIGHT, "batch_size": 1}},
         "5": {"class_type": "KSampler",
               "inputs": {
                   "model": ["1", 0], "positive": ["2", 0], "negative": ["3", 0],
                   "latent_image": ["4", 0],
-                  "seed": random.randint(0, 2 ** 32 - 1),
-                  "steps": 15, "cfg": 7.0,
-                  "sampler_name": "euler", "scheduler": "normal", "denoise": 1.0,
+                  "seed": seed,
+                  "steps": _BASE_STEPS, "cfg": _CFG,
+                  "sampler_name": "dpmpp_2m", "scheduler": "karras", "denoise": 1.0,
               }},
+        "10": {"class_type": "LatentUpscale",
+               "inputs": {
+                   "samples": ["5", 0], "upscale_method": "nearest-exact",
+                   "width": _HIRES_WIDTH, "height": _HIRES_HEIGHT, "crop": "disabled",
+               }},
+        "11": {"class_type": "KSampler",
+               "inputs": {
+                   "model": ["1", 0], "positive": ["2", 0], "negative": ["3", 0],
+                   "latent_image": ["10", 0],
+                   "seed": seed,
+                   "steps": _HIRES_STEPS, "cfg": _CFG,
+                   "sampler_name": "dpmpp_2m", "scheduler": "karras",
+                   "denoise": _HIRES_DENOISE,
+               }},
         "6": {"class_type": "VAEDecode",
-              "inputs": {"samples": ["5", 0], "vae": ["1", 2]}},
+              "inputs": {"samples": ["11", 0], "vae": ["1", 2]}},
         "7": {"class_type": "SaveImage",
               "inputs": {"images": ["6", 0], "filename_prefix": shot_id}},
     }
+
+    if vae is not None:
+        workflow["9"] = {"class_type": "VAELoader", "inputs": {"vae_name": vae}}
+        workflow["6"]["inputs"]["vae"] = ["9", 0]
+
+    return workflow
 
 
 def save_storyboard_prompts(project: str, prompts: list[dict]) -> None:
@@ -462,6 +567,9 @@ def generate_storyboard_images(project: str) -> Generator[str, None, None]:
         return
     yield f"Model: {checkpoint}"
 
+    vae = _find_vae()
+    yield f"VAE: {vae}" if vae else "VAE: checkpoint built-in"
+
     out_dir = REPO_ROOT / "outputs" / f"{project}_storyboards"
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -475,8 +583,11 @@ def generate_storyboard_images(project: str) -> Generator[str, None, None]:
 
         yield f"[{i + 1}/{total}] Submitting {shot_id}..."
 
-        # Build and submit workflow
-        workflow = _comfyui_workflow(prompt_text, negative, shot_id, checkpoint)
+        # Build and submit workflow. The seed is drawn here rather than inside
+        # the workflow so it can be logged — otherwise a good render is
+        # impossible to reproduce.
+        seed = random.randint(0, 2 ** 32 - 1)
+        workflow = _comfyui_workflow(prompt_text, negative, shot_id, checkpoint, vae, seed)
         try:
             payload = json.dumps({"prompt": workflow, "client_id": client_id}).encode()
             req = urllib.request.Request(
@@ -539,7 +650,7 @@ def generate_storyboard_images(project: str) -> Generator[str, None, None]:
                 img_bytes = resp.read()
             output_path = out_dir / f"{shot_id}.png"
             output_path.write_bytes(img_bytes)
-            yield f"  Saved {shot_id}.png ({len(img_bytes) // 1024} KB)"
+            yield f"  Saved {shot_id}.png ({len(img_bytes) // 1024} KB, seed {seed})"
         except Exception as exc:
             yield f"  ERROR: Could not download {shot_id}: {exc}"
 
