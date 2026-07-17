@@ -1,954 +1,864 @@
 /**
- * Kids Animation Studio — Frontend JavaScript
+ * Kids Animation Studio — studio workspace controller (vanilla ES module).
+ *
+ * The server is the source of truth: the pipeline stepper is hydrated from
+ * GET /api/project/<p>/status, and every long operation streams progress
+ * through ONE shared SSE helper (runSSE) into the persistent activity log.
  */
 
 // ---------------------------------------------------------------------------
-// Global state
+// Pipeline definition
 // ---------------------------------------------------------------------------
+
+const STAGES = [
+  { id: 'project',    icon: '📁', name: 'Project' },
+  { id: 'lyrics',     icon: '✍️', name: 'Lyrics' },
+  { id: 'music',      icon: '🎵', name: 'Music' },
+  { id: 'storyboard', icon: '🖼️', name: 'Storyboard' },
+  { id: 'animate',    icon: '🎬', name: 'Animate' },
+  { id: 'video',      icon: '🎞️', name: 'Video' },
+];
+
+const LANG_NAME_TO_CODE = { English: 'en', Hindi: 'hi' };
+const LANG_CODE_TO_NAME = { en: 'English', hi: 'Hindi' };
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
 const state = {
   project: null,
-  lyrics: null,
-  prompts: [],
+  activeStage: 'project',
+  status: null,        // last /status snapshot for the active project
+  running: null,       // stage id currently streaming, or null
+  errored: null,       // stage id in an error state, or null
 };
 
 // ---------------------------------------------------------------------------
-// State persistence (localStorage)
+// Tiny DOM helpers
 // ---------------------------------------------------------------------------
-const STORAGE_KEY = 'kidsAnimStudio_v1';
 
-function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      project: state.project,
-      lyrics: state.lyrics,
-      tab: document.querySelector('.sidebar-nav .nav-item.active')?.dataset.tab || 'project',
-    }));
-  } catch (_) {}
+const $ = (id) => document.getElementById(id);
+
+function el(tag, props = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') node.className = v;
+    else if (k === 'text') node.textContent = v;
+    else if (k === 'html') node.innerHTML = v;      // only used with trusted static strings
+    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
+    else if (v === true) node.setAttribute(k, '');
+    else if (v !== false && v != null) node.setAttribute(k, v);
+  }
+  for (const c of children) {
+    if (c == null) continue;
+    node.append(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  return node;
 }
-
-function loadPersistedState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch (_) { return null; }
-}
-
-// ---------------------------------------------------------------------------
-// Utilities
-// ---------------------------------------------------------------------------
 
 function toast(message, type = 'info') {
-  const container = document.getElementById('toast-container');
+  const container = $('toast-container');
   if (!container) return;
-  const el = document.createElement('div');
-  el.className = `toast toast-${type}`;
-  el.textContent = message;
-  container.appendChild(el);
-  el.getBoundingClientRect();
-  el.classList.add('toast-visible');
+  const node = el('div', { class: `toast toast-${type}`, text: message });
+  container.appendChild(node);
+  node.getBoundingClientRect();
+  node.classList.add('show');
   setTimeout(() => {
-    el.classList.remove('toast-visible');
-    el.addEventListener('transitionend', () => el.remove(), { once: true });
-    setTimeout(() => el.remove(), 500);
-  }, 4000);
+    node.classList.remove('show');
+    node.addEventListener('transitionend', () => node.remove(), { once: true });
+    setTimeout(() => node.remove(), 600);
+  }, 4200);
 }
 
-function setLoading(btn, loading, loadingText = 'Working...') {
-  if (!btn) return;
-  if (loading) {
-    btn.disabled = true;
-    btn.dataset.originalText = btn.textContent;
-    btn.textContent = loadingText;
-  } else {
-    btn.disabled = false;
-    btn.textContent = btn.dataset.originalText || btn.textContent;
-  }
-}
-
-function escapeHtml(str) {
-  if (str == null) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function announce(msg) {
+  const a = $('sr-announcer');
+  if (a) a.textContent = msg;
 }
 
 async function api(method, path, body = null) {
-  const options = { method, headers: { 'Content-Type': 'application/json' } };
-  if (body !== null) options.body = JSON.stringify(body);
-  const response = await fetch(path, options);
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    throw new Error(`API error: ${response.status} (non-JSON response)`);
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== null) opts.body = JSON.stringify(body);
+  const res = await fetch(path, opts);
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) throw new Error(`API error ${res.status} (non-JSON)`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || `API error ${res.status}`);
+  return data.data;
+}
+
+function busy(btn, on, label = 'Working…') {
+  if (!btn) return;
+  if (on) {
+    btn.disabled = true;
+    if (!btn.dataset.orig) btn.dataset.orig = btn.innerHTML;
+    btn.innerHTML = `<span class="spin" aria-hidden="true"></span> ${label}`;
+  } else {
+    btn.disabled = false;
+    if (btn.dataset.orig) { btn.innerHTML = btn.dataset.orig; delete btn.dataset.orig; }
   }
-  const data = await response.json();
-  if (!data.ok) throw new Error(data.error || `API error: ${response.status}`);
-  return data;
-}
-
-function appendLog(preEl, line) {
-  preEl.textContent += line + '\n';
-  preEl.scrollTop = preEl.scrollHeight;
-}
-
-// Show a CSS-hidden element (for elements hidden by ID rules in the stylesheet).
-function show(id) {
-  const el = document.getElementById(id);
-  if (el) el.style.display = 'block';
-}
-
-function hide(id) {
-  const el = document.getElementById(id);
-  if (el) el.style.display = 'none';
 }
 
 // ---------------------------------------------------------------------------
-// Pre-flight validation
+// Activity log + SSE (the ONE shared realtime helper)
 // ---------------------------------------------------------------------------
 
-// Cache result so we don't hit the endpoint on every button click.
-let _configOk = null;
+function openDrawer(open) {
+  const drawer = $('activity-drawer');
+  const toggle = $('activity-toggle');
+  drawer.hidden = !open;
+  toggle.setAttribute('aria-expanded', String(open));
+  const caret = open ? '▼' : '▲';
+  toggle.lastChild.textContent = ` Activity ${caret}`;
+}
 
-async function preflight(requireProject = false) {
-  // Check API key once, cache result
-  if (_configOk === null) {
-    try {
-      await api('GET', '/api/config/check');
-      _configOk = true;
-    } catch (err) {
-      _configOk = false;
-      toast(`API key error: ${err.message}`, 'error');
-      return false;
+function logLine(line) {
+  const log = $('activity-log');
+  log.textContent += line + '\n';
+  log.scrollTop = log.scrollHeight;
+}
+
+function setLive(on) {
+  const dot = $('activity-live');
+  if (dot) dot.hidden = !on;
+}
+
+/**
+ * Run a Server-Sent Events stream, funnelling every line into the shared
+ * activity log. This is the single EventSource handler used by ALL stages.
+ *
+ * @param {string} url
+ * @param {{stage?:string, label?:string, onLine?:Function, onDone?:Function, onError?:Function}} opts
+ */
+function runSSE(url, opts = {}) {
+  const { stage, label, onLine, onDone, onError } = opts;
+  openDrawer(true);
+  setLive(true);
+  if (label) logLine(`\n▸ ${label}`);
+  if (stage) setStageRunning(stage);
+
+  const src = new EventSource(url);
+  let finished = false;
+
+  const stop = () => { finished = true; src.close(); setLive(false); };
+
+  src.onmessage = (e) => {
+    const line = e.data;
+    if (line === 'DONE') {
+      stop();
+      if (stage) clearStageRunning(stage);
+      onDone && onDone();
+    } else if (line.startsWith('ERROR')) {
+      stop();
+      logLine(line);
+      if (stage) setStageError(stage);
+      onError && onError(line);
+    } else {
+      logLine(line);
+      onLine && onLine(line);
     }
-  } else if (!_configOk) {
-    toast('ANTHROPIC_API_KEY is not configured in .env — restart the server after adding it', 'error');
-    return false;
-  }
+  };
 
-  if (requireProject && !state.project) {
-    toast('Select a project first (Project tab)', 'error');
-    return false;
-  }
+  src.onerror = () => {
+    if (finished) return;
+    stop();
+    logLine('[stream disconnected]');
+    if (stage) setStageError(stage);
+    onError && onError('stream disconnected');
+  };
 
-  return true;
+  return src;
 }
 
 // ---------------------------------------------------------------------------
-// Tab navigation
+// Stepper
 // ---------------------------------------------------------------------------
 
-function switchTab(tabName) {
-  // CSS uses .active class on .tab-panel — toggle that, not the hidden attribute
-  document.querySelectorAll('.tab-panel').forEach(panel => {
-    panel.classList.remove('active');
+/** Compute {status, locked} for a stage from the current status snapshot. */
+function stageState(id) {
+  const s = state.status;
+  const hasProject = !!state.project;
+
+  // transient states win over disk-derived state
+  if (state.running === id) return { status: 'progress', locked: false };
+  if (state.errored === id) return { status: 'error', locked: false };
+
+  if (!hasProject) {
+    return id === 'project'
+      ? { status: 'available', locked: false }
+      : { status: 'locked', locked: true };
+  }
+  if (!s) return { status: id === 'project' ? 'done' : 'available', locked: id !== 'project' };
+
+  const hasLyrics = s.has_lyrics;
+  const hasImages = s.image_count > 0;
+  const hasAnim = s.has_animation;
+  const hasVideo = s.has_animatic || s.has_animation;
+
+  switch (id) {
+    case 'project':
+      return { status: 'done', locked: false };
+    case 'lyrics':
+      return { status: hasLyrics ? 'done' : 'available', locked: false };
+    case 'music':
+      if (!hasLyrics) return { status: 'locked', locked: true };
+      return { status: s.has_song ? 'done' : 'available', locked: false };
+    case 'storyboard':
+      if (!hasLyrics) return { status: 'locked', locked: true };
+      return { status: hasImages ? 'done' : 'available', locked: false };
+    case 'animate':
+      if (hasAnim) return { status: 'done', locked: false };  // completed artifact never locks
+      if (!hasImages) return { status: 'locked', locked: true };
+      return { status: 'available', locked: false };
+    case 'video':
+      if (!hasImages && !hasAnim) return { status: 'locked', locked: true };
+      return { status: hasVideo ? 'done' : 'available', locked: false };
+    default:
+      return { status: 'available', locked: false };
+  }
+}
+
+function renderStepper() {
+  const ol = $('stepper');
+  ol.innerHTML = '';
+  STAGES.forEach((stg, i) => {
+    const { status, locked } = stageState(stg.id);
+    const btn = el('button', {
+      class: `step ${status}${stg.id === state.activeStage ? ' current' : ''}`,
+      type: 'button',
+      'data-stage': stg.id,
+      'aria-current': stg.id === state.activeStage ? 'step' : false,
+      title: locked ? `${stg.name} — locked` : stg.name,
+      onclick: () => { if (!locked) focusStage(stg.id); else nudgeLocked(stg.id); },
+    },
+      el('span', { class: 'step-idx', 'aria-hidden': 'true', text: String(i + 1) }),
+      el('span', { class: 'step-dot', 'aria-hidden': 'true' }),
+      el('span', { class: 'step-body' },
+        el('span', { class: 'step-name', text: stg.name }),
+        el('span', { class: 'step-status', text: statusLabel(status) }),
+      ),
+      el('span', { class: 'step-icon', 'aria-hidden': 'true', text: stg.icon }),
+    );
+    if (locked) btn.classList.add('is-locked');
+    ol.appendChild(btn);
   });
+}
 
-  // Panel IDs are panel-<name>, not tab-<name>
-  const target = document.getElementById(`panel-${tabName}`);
-  if (target) target.classList.add('active');
+function statusLabel(status) {
+  return { locked: 'Locked', available: 'Ready', progress: 'Working…', done: 'Done', error: 'Error' }[status] || '';
+}
 
-  // Sidebar items are <li class="nav-item"> with data-tab attribute
-  document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
-    const active = item.dataset.tab === tabName;
-    item.classList.toggle('active', active);
-    item.setAttribute('aria-selected', active ? 'true' : 'false');
-    item.setAttribute('tabindex', active ? '0' : '-1');
+function nudgeLocked(id) {
+  const prereq = {
+    lyrics: 'Select a project first.',
+    music: 'Generate lyrics first.',
+    storyboard: 'Generate lyrics first.',
+    animate: 'Generate storyboard images first.',
+    video: 'Generate a storyboard or animation first.',
+  }[id] || 'This stage is locked.';
+  toast(prereq, 'warn');
+}
+
+function setStageRunning(id) { state.running = id; state.errored = null; renderStepper(); }
+function clearStageRunning(id) { if (state.running === id) state.running = null; renderStepper(); }
+function setStageError(id) { state.running = null; state.errored = id; renderStepper(); }
+
+// ---------------------------------------------------------------------------
+// Stage focus / navigation
+// ---------------------------------------------------------------------------
+
+function focusStage(id) {
+  state.activeStage = id;
+  // A stale error dot from an earlier failed run should not follow the user
+  // around the session — clear it when they navigate.
+  state.errored = null;
+  document.querySelectorAll('.stage-panel').forEach(p => {
+    p.classList.toggle('active', p.dataset.stage === id);
   });
+  renderStepper();
+  $('stage').scrollTop = 0;
 
-  // Load tab-specific data
-  if (tabName === 'audio' && state.project) loadShotTable();
-  if (tabName === 'storyboard' && state.project) loadGallery();
-
-  saveState();
+  if (id === 'music') refreshMusicStage();
+  if (id === 'storyboard') loadGallery();
+  if (id === 'animate') refreshAnimateStage();
+  if (id === 'video') refreshVideoStage();
 }
 
 // ---------------------------------------------------------------------------
-// Project tab
+// Status hydration
 // ---------------------------------------------------------------------------
 
-async function loadProjectList() {
+async function hydrateStatus() {
+  if (!state.project) { state.status = null; renderStepper(); updateChrome(); return; }
   try {
-    const data = await api('GET', '/api/project/list');
-    const projects = data.data || [];
-
-    // Populate project list
-    const listEl = document.getElementById('project-list');
-    if (listEl) {
-      listEl.innerHTML = '';
-      if (projects.length === 0) {
-        const li = document.createElement('li');
-        li.className = 'projects-empty';
-        li.textContent = 'No projects yet. Create one above to get started.';
-        listEl.appendChild(li);
-      } else {
-        projects.forEach(name => {
-          const li = document.createElement('li');
-          li.textContent = name;
-          if (name === state.project) li.classList.add('selected');
-          li.addEventListener('click', () => setProject(name));
-          listEl.appendChild(li);
-        });
-      }
-    }
-
-    // Populate header dropdown
-    const selectEl = document.getElementById('project-select');
-    if (selectEl) {
-      const currentValue = selectEl.value;
-      Array.from(selectEl.options).forEach(opt => { if (opt.value !== '') opt.remove(); });
-      projects.forEach(name => {
-        const opt = document.createElement('option');
-        opt.value = name;
-        opt.textContent = name;
-        selectEl.appendChild(opt);
-      });
-      if (state.project && projects.includes(state.project)) {
-        selectEl.value = state.project;
-      } else if (currentValue && projects.includes(currentValue)) {
-        selectEl.value = currentValue;
-      }
-    }
+    state.status = await api('GET', `/api/project/${encodeURIComponent(state.project)}/status`);
   } catch (err) {
+    state.status = null;
+  }
+  renderStepper();
+  updateChrome();
+}
+
+/** Update the top-bar Final Video affordance and the bottom media bar. */
+function updateChrome() {
+  const s = state.status;
+  const hasVideo = !!(s && (s.has_animation || s.has_animatic));
+
+  const fv = $('final-video-btn');
+  fv.classList.toggle('dim', !hasVideo);
+  fv.disabled = !hasVideo;
+
+  // Media bar audio (song)
+  const mbAudio = $('mb-audio');
+  const mbTitle = $('mb-title');
+  const mbVideoBtn = $('mb-video-btn');
+  if (s && s.has_song && state.project) {
+    const src = `/api/music/song/${encodeURIComponent(state.project)}`;
+    if (mbAudio.dataset.for !== src) { mbAudio.src = src; mbAudio.dataset.for = src; }
+    mbAudio.hidden = false;
+    mbTitle.textContent = `${state.project} — song`;
+  } else {
+    mbAudio.hidden = true;
+    mbAudio.removeAttribute('src');
+    delete mbAudio.dataset.for;
+    mbTitle.textContent = state.project ? `${state.project}` : 'Nothing loaded';
+  }
+  mbVideoBtn.hidden = !hasVideo;
+}
+
+// ---------------------------------------------------------------------------
+// Project stage
+// ---------------------------------------------------------------------------
+
+async function loadProjects() {
+  let projects = [];
+  try { projects = await api('GET', '/api/project/list'); } catch (err) {
     toast(`Failed to load projects: ${err.message}`, 'error');
   }
+
+  // dropdown
+  const sel = $('project-select');
+  const keep = sel.value;
+  Array.from(sel.options).forEach(o => { if (o.value) o.remove(); });
+  projects.forEach(name => sel.appendChild(el('option', { value: name, text: name })));
+  if (state.project && projects.includes(state.project)) sel.value = state.project;
+  else if (keep && projects.includes(keep)) sel.value = keep;
+
+  // grid of cards
+  const grid = $('project-grid');
+  grid.innerHTML = '';
+  if (!projects.length) {
+    grid.appendChild(el('p', { class: 'empty', text: 'No projects yet — create one to begin.' }));
+    return;
+  }
+  projects.forEach(name => {
+    const card = el('button', {
+      class: `proj-card${name === state.project ? ' selected' : ''}`,
+      type: 'button',
+      onclick: () => selectProject(name),
+    },
+      el('span', { class: 'proj-card-icon', 'aria-hidden': 'true', text: '🎬' }),
+      el('span', { class: 'proj-card-name', text: name }),
+    );
+    grid.appendChild(card);
+  });
 }
 
-function setProject(name) {
+async function selectProject(name) {
   state.project = name;
+  $('project-select').value = name;
+  document.querySelectorAll('.proj-card').forEach(c =>
+    c.classList.toggle('selected', c.querySelector('.proj-card-name')?.textContent === name));
+  toast(`Project “${name}” selected`, 'success');
+  announce(`Project ${name} selected`);
+  await hydrateAll();
+}
 
-  // Sync header dropdown
-  const selectEl = document.getElementById('project-select');
-  if (selectEl) selectEl.value = name;
-
-  // Highlight selected item in list
-  document.querySelectorAll('#project-list li:not(.projects-empty)').forEach(li => {
-    li.classList.toggle('selected', li.textContent === name);
-  });
-
-  // Update the hint text
-  const hintSpan = document.querySelector('#project-hint .hint-text');
-  if (hintSpan) {
-    hintSpan.textContent = `Project "${name}" selected. Click a tab in the sidebar to continue.`;
-  }
-
-  // Clear the "requires a project" note on the Storyboard tab
-  const promptsNote = document.getElementById('prompts-project-note');
-  if (promptsNote) promptsNote.textContent = '';
-
-  toast(`Project "${name}" selected`, 'success');
-  saveState();
+/** Full re-hydration of every stage's server-backed data for the active project. */
+async function hydrateAll() {
+  await hydrateStatus();
+  await loadLyricsIntoEditor();
+  await loadPromptsIntoList();
+  refreshMusicStage();
+  refreshAnimateStage();
+  refreshVideoStage();
+  loadGallery();
 }
 
 async function createProject() {
-  // HTML input is id="project-name" (not "new-project-name")
-  const nameInput = document.getElementById('project-name');
-  const typeInput = document.getElementById('project-type');
-  const btn = document.getElementById('create-project-btn');
-
-  const name = nameInput ? nameInput.value.trim() : '';
-  const type = typeInput ? typeInput.value : 'kids';
-
-  if (!name) { toast('Project name is required', 'error'); return; }
-  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
-    toast('Name may only contain letters, numbers, underscores, and hyphens', 'error');
-    return;
-  }
-
-  setLoading(btn, true, 'Creating...');
+  const name = $('project-name').value.trim();
+  const type = $('project-type').value;
+  if (!name) { toast('Enter a project name', 'error'); return; }
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) { toast('Name: letters, numbers, - and _ only', 'error'); return; }
+  const btn = $('create-project-btn');
+  busy(btn, true, 'Creating…');
   try {
     await api('POST', '/api/project/create', { name, type });
-    toast(`Project "${name}" created!`, 'success');
-    if (nameInput) nameInput.value = '';
-    await loadProjectList();
-    setProject(name);
+    $('project-name').value = '';
+    toast(`Project “${name}” created`, 'success');
+    await loadProjects();
+    await selectProject(name);
+    focusStage('lyrics');
   } catch (err) {
-    toast(`Failed to create project: ${err.message}`, 'error');
+    toast(`Create failed: ${err.message}`, 'error');
   } finally {
-    setLoading(btn, false);
+    busy(btn, false);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Lyrics & Music tab
+// Lyrics stage
 // ---------------------------------------------------------------------------
 
+async function loadLyricsIntoEditor() {
+  const ta = $('lyrics-textarea');
+  const card = $('lyrics-editor-card');
+  ta.value = '';
+  card.hidden = true;
+  if (!state.project) return;
+  try {
+    const lyrics = await api('GET', `/api/lyrics/${encodeURIComponent(state.project)}`);
+    if (lyrics) { ta.value = lyrics; card.hidden = false; }
+  } catch (_) {}
+  // restore language selection from status
+  if (state.status && state.status.language) {
+    const nm = LANG_CODE_TO_NAME[state.status.language];
+    if (nm) $('lyrics-language').value = nm;
+  }
+}
+
 async function generateLyrics() {
-  const themeInput = document.getElementById('lyrics-theme');
-  const styleInput = document.getElementById('lyrics-style');
-  const versesInput = document.getElementById('lyrics-verses');
-  const languageInput = document.getElementById('lyrics-language');
-  const btn = document.getElementById('generate-lyrics-btn');
-
-  const theme = themeInput ? themeInput.value.trim() : '';
-  const style = styleInput ? styleInput.value.trim() : '';
-  const verses = versesInput ? parseInt(versesInput.value, 10) || 3 : 3;
-  const language = languageInput ? languageInput.value.trim() : 'English';
-
-  // Validate locally before any network call
-  if (!theme) { toast('Enter a theme before generating lyrics', 'error'); themeInput?.focus(); return; }
-  if (verses < 1 || verses > 10) { toast('Number of verses must be between 1 and 10', 'error'); versesInput?.focus(); return; }
+  if (!requireProject()) return;
+  const theme = $('lyrics-theme').value.trim();
+  const style = $('lyrics-style').value.trim();
+  const language = $('lyrics-language').value;
+  const verses = parseInt($('lyrics-verses').value, 10) || 3;
+  if (!theme) { toast('Enter a theme', 'error'); return; }
   if (!await preflight()) return;
 
-  setLoading(btn, true, 'Generating...');
+  const btn = $('generate-lyrics-btn');
+  busy(btn, true, 'Writing…');
   try {
     const data = await api('POST', '/api/generate/lyrics', { theme, style, verses, language });
-    state.lyrics = data.data.lyrics_text;
-
-    // CSS hides #lyrics-result with display:none — must use style.display to show it
-    show('lyrics-result');
-    show('chords-section');
-
-    const textarea = document.getElementById('lyrics-textarea');
-    if (textarea) textarea.value = data.data.lyrics_text;
-
-    saveState();
-    toast('Lyrics generated!', 'success');
+    const text = data.lyrics_text || '';
+    $('lyrics-textarea').value = text;
+    $('lyrics-editor-card').hidden = false;
+    await saveLyrics(true);
+    toast('Lyrics generated', 'success');
+    focusStage('lyrics');
   } catch (err) {
-    toast(`Failed to generate lyrics: ${err.message}`, 'error');
+    toast(`Lyrics failed: ${err.message}`, 'error');
   } finally {
-    setLoading(btn, false);
+    busy(btn, false);
+  }
+}
+
+async function saveLyrics(silent) {
+  if (!state.project) return;
+  const lyrics = $('lyrics-textarea').value.trim();
+  if (!lyrics) return;
+  const language = $('lyrics-language').value;
+  try {
+    await api('POST', '/api/lyrics/save', { project: state.project, lyrics, language });
+    if (!silent) toast('Lyrics saved', 'success');
+    await hydrateStatus();
+    refreshMusicStage();
+  } catch (err) {
+    if (!silent) toast(`Save failed: ${err.message}`, 'error');
   }
 }
 
 async function generateChords() {
-  const btn = document.getElementById('generate-chords-btn');
-
-  const textarea = document.getElementById('lyrics-textarea');
-  if (textarea && textarea.value.trim()) state.lyrics = textarea.value.trim();
-
-  // Validate before any network call
-  if (!state.lyrics || state.lyrics.trim().length < 20) {
-    toast('Add more lyrics before generating chords (at least a few lines)', 'error');
-    return;
-  }
+  if (!requireProject()) return;
+  const lyrics = $('lyrics-textarea').value.trim();
+  if (lyrics.length < 20) { toast('Add more lyrics before generating chords', 'error'); return; }
   if (!await preflight()) return;
-
-  setLoading(btn, true, 'Generating chords...');
+  const btn = $('generate-chords-btn');
+  busy(btn, true, 'Chords…');
   try {
-    // Pass the chosen style through so it steers the tempo that ends up in
-    // chords.json — and therefore the tempo the instrumental is synthesised at.
     const data = await api('POST', '/api/generate/chords', {
-      lyrics: state.lyrics,
-      project: state.project || '',
-      style: document.getElementById('lyrics-style')?.value || '',
+      lyrics, project: state.project, style: $('lyrics-style').value,
     });
-
-    // HTML: <div id="chords-display" class="hidden"> + <pre id="chords-pre">
-    const chordsDisplay = document.getElementById('chords-display');
-    if (chordsDisplay) chordsDisplay.classList.remove('hidden');
-
-    const pre = document.getElementById('chords-pre');
-    if (pre) {
-      const parts = [];
-      if (data.data.style) parts.push(`Style: ${data.data.style}`);
-      if (data.data.tempo_bpm) parts.push(`Tempo: ${data.data.tempo_bpm} BPM`);
-      if (data.data.chords?.length) parts.push(`Chords: ${data.data.chords.join(', ')}`);
-      if (data.data.chord_chart) parts.push('', data.data.chord_chart);
-      pre.textContent = parts.join('\n');
-    }
-
-    toast('Chords generated!', 'success');
+    const pre = $('chords-pre');
+    const parts = [];
+    if (data.style) parts.push(`Style:  ${data.style}`);
+    if (data.tempo_bpm) parts.push(`Tempo:  ${data.tempo_bpm} BPM`);
+    if (data.chords?.length) parts.push(`Chords: ${data.chords.join(', ')}`);
+    if (data.chord_chart) parts.push('', data.chord_chart);
+    pre.textContent = parts.join('\n');
+    pre.hidden = false;
+    toast('Chords generated', 'success');
   } catch (err) {
-    toast(`Failed to generate chords: ${err.message}`, 'error');
+    toast(`Chords failed: ${err.message}`, 'error');
   } finally {
-    setLoading(btn, false);
+    busy(btn, false);
   }
 }
 
-function copyToClipboard(text, label) {
-  navigator.clipboard.writeText(text)
-    .then(() => toast(`${label} copied!`, 'success'))
-    .catch(() => toast(`Failed to copy ${label}`, 'error'));
+// ---------------------------------------------------------------------------
+// Music stage
+// ---------------------------------------------------------------------------
+
+function refreshMusicStage() {
+  const s = state.status;
+  const label = $('music-lyrics-label');
+  const bar = $('music-lyrics-state');
+  const btn = $('generate-song-btn');
+  const hasLyrics = !!(s && s.has_lyrics);
+
+  bar.classList.toggle('ok', hasLyrics);
+  bar.classList.toggle('warn', !hasLyrics);
+  if (!state.project) label.textContent = 'Select a project first.';
+  else if (hasLyrics) {
+    const lang = s.language ? (LANG_CODE_TO_NAME[s.language] || s.language) : 'English';
+    label.textContent = `Lyrics ready — will be sung in ${lang}.`;
+  } else label.textContent = 'No lyrics yet — write them in the Lyrics stage.';
+  if (btn) btn.disabled = !hasLyrics;
+
+  // song player
+  const player = $('song-player');
+  if (s && s.has_song && state.project) {
+    const base = `/api/music/song/${encodeURIComponent(state.project)}`;
+    $('song-audio').src = `${base}?t=${Date.now()}`;
+    $('song-download').href = base;
+    player.hidden = false;
+  } else {
+    player.hidden = true;
+  }
+}
+
+function generateSong() {
+  if (!requireProject()) return;
+  if (!(state.status && state.status.has_lyrics)) { toast('Generate lyrics first', 'warn'); return; }
+  const btn = $('generate-song-btn');
+  const langCode = LANG_NAME_TO_CODE[$('lyrics-language').value] || 'en';
+  busy(btn, true, 'Generating song…');
+  runSSE(
+    `/api/music/generate?project=${encodeURIComponent(state.project)}&language=${langCode}`,
+    {
+      stage: 'music',
+      label: `Music — generating sung song (${state.project})`,
+      onDone: async () => {
+        busy(btn, false);
+        toast('Song ready!', 'success');
+        await hydrateStatus();
+        refreshMusicStage();
+      },
+      onError: (line) => { busy(btn, false); toast(line, 'error'); },
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Storyboards tab
+// Storyboard stage
 // ---------------------------------------------------------------------------
 
-function renderPromptCard(shot) {
-  const safeId = CSS.escape(shot.shot_id);
-  const eShotId = escapeHtml(shot.shot_id);
-  const eNegPrompt = escapeHtml(shot.negative_prompt);
-  return `
-    <div class="prompt-card" data-shot-id="${eShotId}">
-      <div class="prompt-card-header">
-        <span class="prompt-card-shot">${eShotId}</span>
-      </div>
-      <label class="prompt-label" for="prompt-${safeId}">Prompt</label>
-      <textarea
-        class="prompt-textarea form-control"
-        id="prompt-${safeId}"
-        rows="4"
-        data-shot-id="${eShotId}"
-      ></textarea>
-      ${eNegPrompt ? `<div class="negative-prompt section-note">Negative: ${eNegPrompt}</div>` : ''}
-    </div>
-  `;
+async function loadPromptsIntoList() {
+  const list = $('prompts-list');
+  list.innerHTML = '';
+  list.hidden = true;
+  if (!state.project) return;
+  try {
+    const prompts = await api('GET', `/api/prompts/${encodeURIComponent(state.project)}`);
+    if (prompts && prompts.length) renderPrompts(prompts);
+  } catch (_) {}
+}
+
+function renderPrompts(prompts) {
+  const list = $('prompts-list');
+  list.innerHTML = '';
+  prompts.forEach(p => {
+    const card = el('div', { class: 'prompt-card' },
+      el('div', { class: 'prompt-shot', text: p.shot_id || '' }),
+      el('div', { class: 'prompt-text', text: p.prompt || '' }),
+    );
+    list.appendChild(card);
+  });
+  list.hidden = false;
 }
 
 async function generatePrompts() {
-  // Validate before any network call
-  if (!await preflight(true)) return;
-
-  const btn = document.getElementById('generate-prompts-btn');
-  const styleInput = document.getElementById('styleguide-style') || document.getElementById('prompt-style');
-  const style = (styleInput && styleInput.value.trim()) ? styleInput.value.trim() : 'cartoon 2d flat color';
-
-  setLoading(btn, true, 'Generating prompts...');
+  if (!requireProject()) return;
+  if (!await preflight()) return;
+  const btn = $('generate-prompts-btn');
+  busy(btn, true, 'Prompts…');
   try {
-    // Include current lyrics so Claude can write scene-specific prompts
-    const lyricsNow = document.getElementById('lyrics-textarea')?.value.trim() || state.lyrics || '';
-    const data = await api('POST', '/api/generate/prompts', { project: state.project, style, lyrics: lyricsNow });
-    state.prompts = data.data || [];
-
-    // CSS hides #prompts-list with display:none
-    const listEl = document.getElementById('prompts-list');
-    if (listEl) {
-      listEl.style.display = 'block';
-      listEl.innerHTML = state.prompts.map(renderPromptCard).join('');
-      state.prompts.forEach(shot => {
-        const ta = listEl.querySelector(`#prompt-${CSS.escape(shot.shot_id)}`);
-        if (ta) ta.value = shot.prompt || '';
-      });
-    }
-
-    saveState();
-    toast(`Generated ${state.prompts.length} shot prompts!`, 'success');
+    const lyrics = $('lyrics-textarea').value.trim() || '';
+    const prompts = await api('POST', '/api/generate/prompts',
+      { project: state.project, style: 'cartoon 2d flat color', lyrics });
+    renderPrompts(prompts || []);
+    toast(`Generated ${prompts.length} shot prompts`, 'success');
+    await hydrateStatus();
   } catch (err) {
-    toast(`Failed to generate prompts: ${err.message}`, 'error');
+    toast(`Prompts failed: ${err.message}`, 'error');
   } finally {
-    setLoading(btn, false);
+    busy(btn, false);
   }
 }
 
-async function generateImages() {
-  if (!await preflight(true)) return;
-
-  const logEl = document.getElementById('generate-images-log');
-  const btn = document.getElementById('generate-images-btn');
-  if (!logEl) return;
-
-  logEl.classList.add('visible');
-  logEl.textContent = '';
-  setLoading(btn, true, 'Generating images...');
-
-  const source = new EventSource(
-    `/api/storyboards/generate?project=${encodeURIComponent(state.project)}`
+function generateImages() {
+  if (!requireProject()) return;
+  const btn = $('generate-images-btn');
+  busy(btn, true, 'Painting…');
+  runSSE(
+    `/api/storyboards/generate?project=${encodeURIComponent(state.project)}`,
+    {
+      stage: 'storyboard',
+      label: `Storyboard — generating images (${state.project})`,
+      onDone: async () => {
+        busy(btn, false);
+        toast('All images generated', 'success');
+        await hydrateStatus();
+        loadGallery();
+      },
+      onError: (line) => { busy(btn, false); toast(line, 'error'); },
+    },
   );
-  let streamDone = false;
-
-  source.onmessage = event => {
-    const line = event.data;
-    if (line === 'DONE') {
-      streamDone = true;
-      source.close();
-      setLoading(btn, false);
-      toast('All images generated!', 'success');
-      loadGallery();
-    } else if (line.startsWith('ERROR:')) {
-      streamDone = true;
-      source.close();
-      setLoading(btn, false);
-      toast(line, 'error');
-      appendLog(logEl, line);
-    } else {
-      appendLog(logEl, line);
-    }
-  };
-
-  source.onerror = () => {
-    if (streamDone) return;
-    source.close();
-    setLoading(btn, false);
-    toast('Image generation stream disconnected', 'error');
-  };
 }
 
 async function loadGallery() {
   if (!state.project) return;
-
-  // HTML: <div id="image-gallery"> (not "gallery-grid")
-  const gridEl = document.getElementById('image-gallery');
-  if (!gridEl) return;
-
+  const grid = $('gallery');
+  const count = $('gallery-count');
   try {
-    const data = await api('GET', `/api/storyboards/${state.project}`);
-    const images = data.data || [];
-
-    if (images.length === 0) {
-      gridEl.innerHTML = '<p class="gallery-empty">No images yet — generate them in ComfyUI</p>';
+    const images = await api('GET', `/api/storyboards/${encodeURIComponent(state.project)}`);
+    grid.innerHTML = '';
+    if (!images || !images.length) {
+      grid.appendChild(el('p', { class: 'empty', text: 'No images yet — generate prompts, then images.' }));
+      count.hidden = true;
       return;
     }
-
-    gridEl.innerHTML = images.map(filename => {
-      const shotId = filename.replace(/\.[^.]+$/, '');
-      const encodedProject = encodeURIComponent(state.project);
-      const encodedFile = encodeURIComponent(filename);
-      const eShotId = escapeHtml(shotId);
-      // CSS uses .gallery-item not .gallery-figure
-      return `
-        <div class="gallery-item">
-          <img src="/api/image/${encodedProject}/${encodedFile}" alt="${eShotId}" loading="lazy" />
-          <div class="shot-label">${eShotId}</div>
-        </div>
-      `;
-    }).join('');
-  } catch (err) {
-    toast(`Failed to load gallery: ${err.message}`, 'error');
-    gridEl.innerHTML = '<p class="gallery-empty">Failed to load images</p>';
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Audio tab
-// ---------------------------------------------------------------------------
-
-function renderStatusBadge(hasWav) {
-  return hasWav
-    ? '<span class="badge badge-success">WAV ready</span>'
-    : '<span class="badge badge-muted">No audio</span>';
-}
-
-async function loadShotTable() {
-  if (!state.project) return;
-
-  // HTML: <tbody id="shots-tbody"> (not #shot-table tbody)
-  const tbody = document.getElementById('shots-tbody');
-  if (!tbody) return;
-
-  try {
-    const data = await api('GET', `/api/project/${state.project}/shots`);
-    const shots = data.data || [];
-
-    if (shots.length === 0) {
-      tbody.innerHTML = `<tr class="table-empty-row"><td colspan="5">No shots found for this project.</td></tr>`;
-      return;
-    }
-
-    tbody.innerHTML = shots.map(shot => {
-      const eShotId = escapeHtml(shot.shot_id);
-      const eChar = escapeHtml(shot.character || '');
-      const eDesc = escapeHtml(shot.description || '');
-      const duration = shot.duration != null ? escapeHtml(String(shot.duration)) + 's' : '—';
-      return `
-        <tr data-shot-id="${eShotId}" data-character="${eChar}">
-          <td>${eShotId}</td>
-          <td>${eDesc}</td>
-          <td>${duration}</td>
-          <td>
-            <input type="file" accept="audio/wav,audio/*" class="audio-upload"
-              data-shot-id="${eShotId}" data-character="${eChar}" />
-          </td>
-          <td class="status-cell">${renderStatusBadge(shot.has_wav)}</td>
-        </tr>
-      `;
-    }).join('');
-
-    tbody.querySelectorAll('.audio-upload').forEach(input => {
-      input.addEventListener('change', () => {
-        if (input.files.length > 0) uploadAudio(input.dataset.shotId, input.dataset.character, input);
-      });
+    count.textContent = String(images.length);
+    count.hidden = false;
+    images.forEach(fn => {
+      const shot = fn.replace(/\.[^.]+$/, '');
+      const src = `/api/image/${encodeURIComponent(state.project)}/${encodeURIComponent(fn)}`;
+      const fig = el('figure', { class: 'shot' },
+        el('img', { src, alt: shot, loading: 'lazy' }),
+        el('figcaption', { text: shot }),
+      );
+      grid.appendChild(fig);
     });
   } catch (err) {
-    toast(`Failed to load shots: ${err.message}`, 'error');
-  }
-}
-
-async function uploadAudio(shotId, character, fileInput) {
-  if (!state.project) { toast('Please select a project first', 'error'); return; }
-  const file = fileInput.files[0];
-  if (!file) return;
-
-  const formData = new FormData();
-  formData.append('project', state.project);
-  formData.append('shot_id', shotId);
-  formData.append('character', character);
-  formData.append('file', file);
-
-  try {
-    const response = await fetch('/api/audio/import', { method: 'POST', body: formData });
-    const data = await response.json();
-    if (!data.ok) throw new Error(data.error || 'Upload failed');
-
-    const row = document.querySelector(`#shots-tbody tr[data-shot-id="${CSS.escape(shotId)}"]`);
-    if (row) {
-      const cell = row.querySelector('.status-cell');
-      if (cell) cell.innerHTML = renderStatusBadge(true);
-    }
-    toast(`Audio uploaded for ${shotId}`, 'success');
-  } catch (err) {
-    toast(`Failed to upload audio for ${shotId}: ${err.message}`, 'error');
+    toast(`Gallery failed: ${err.message}`, 'error');
   }
 }
 
 // ---------------------------------------------------------------------------
-// Music — instrumental generation, vocals upload, mixing
+// Animate stage
 // ---------------------------------------------------------------------------
 
-async function generateInstrumental() {
-  if (!await preflight(true)) return;
-  const logEl = document.getElementById('instrumental-log');
-  const btn = document.getElementById('gen-instrumental-btn');
-  const playerDiv = document.getElementById('instrumental-player');
-  if (!logEl) return;
-
-  logEl.classList.add('visible');
-  logEl.textContent = '';
-  hide('instrumental-player');
-  setLoading(btn, true, 'Generating...');
-
-  const source = new EventSource(`/api/music/generate?project=${encodeURIComponent(state.project)}`);
-  source.onmessage = event => {
-    const line = event.data;
-    if (line === 'DONE') {
-      source.close();
-      setLoading(btn, false);
-      // Show player
-      const audioEl = document.getElementById('instrumental-audio');
-      const dlEl = document.getElementById('instrumental-download');
-      if (audioEl) {
-        audioEl.src = `/api/music/instrumental/${encodeURIComponent(state.project)}?t=${Date.now()}`;
-        audioEl.load();
-      }
-      if (dlEl) dlEl.href = `/api/music/instrumental/${encodeURIComponent(state.project)}`;
-      if (playerDiv) playerDiv.style.display = 'flex';
-      toast('Instrumental ready!', 'success');
-    } else if (line.startsWith('ERROR')) {
-      appendLog(logEl, line);
-      source.close();
-      setLoading(btn, false);
-      toast(line, 'error');
-    } else {
-      appendLog(logEl, line);
-    }
-  };
-  source.onerror = () => { source.close(); setLoading(btn, false); };
-}
-
-async function uploadVocals() {
-  if (!await preflight(true)) return;
-  const fileInput = document.getElementById('vocal-file-input');
-  const btn = document.getElementById('upload-vocals-btn');
-  const statusEl = document.getElementById('vocals-status');
-
-  if (!fileInput || !fileInput.files.length) {
-    toast('Choose a WAV file first', 'error');
-    return;
-  }
-  const file = fileInput.files[0];
-  if (!file.name.toLowerCase().endsWith('.wav')) {
-    toast('Please upload a .wav file', 'error');
-    return;
-  }
-
-  const formData = new FormData();
-  formData.append('project', state.project);
-  formData.append('file', file);
-
-  setLoading(btn, true, 'Uploading...');
-  try {
-    const resp = await fetch('/api/music/vocals', { method: 'POST', body: formData });
-    const data = await resp.json();
-    if (!data.ok) throw new Error(data.error || 'Upload failed');
-
-    if (statusEl) statusEl.textContent = `Uploaded: ${data.data.saved} (${data.data.size_kb} KB)`;
-    const audioEl = document.getElementById('vocal-audio');
-    if (audioEl) {
-      audioEl.src = `/api/music/vocals/${encodeURIComponent(state.project)}?t=${Date.now()}`;
-      audioEl.load();
-    }
-    show('vocal-player');
-    toast('Vocals uploaded!', 'success');
-  } catch (err) {
-    toast(`Upload failed: ${err.message}`, 'error');
-  } finally {
-    setLoading(btn, false);
+function refreshAnimateStage() {
+  const s = state.status;
+  const player = $('animation-player');
+  if (s && s.has_animation && state.project) {
+    const base = `/api/animated/${encodeURIComponent(state.project)}`;
+    $('animation-video').src = `${base}?t=${Date.now()}`;
+    $('animation-download').href = base;
+    player.hidden = false;
+  } else {
+    player.hidden = true;
   }
 }
 
-async function mixSong() {
-  if (!await preflight(true)) return;
-  const btn = document.getElementById('mix-song-btn');
-  const ivol = (document.getElementById('mix-ivol')?.value || 70) / 100;
-  const vvol = (document.getElementById('mix-vvol')?.value || 100) / 100;
+function buildAnimation() {
+  if (!requireProject()) return;
+  const btn = $('build-animation-btn');
+  busy(btn, true, 'Animating…');
+  runSSE(
+    `/api/animation/build?project=${encodeURIComponent(state.project)}`,
+    {
+      stage: 'animate',
+      label: `Animate — building 2.5D animation (${state.project})`,
+      onDone: async () => {
+        busy(btn, false);
+        toast('Animation ready!', 'success');
+        await hydrateStatus();
+        refreshAnimateStage();
+        refreshVideoStage();
+      },
+      onError: (line) => {
+        busy(btn, false);
+        // A "not available yet" ERROR is expected until the sibling module lands:
+        // treat it as a "coming soon" notice, not a red error dot on the stepper.
+        if (line.includes('not available yet')) {
+          toast('Animation module is coming soon', 'warn');
+          state.errored = null;
+          renderStepper();
+        } else {
+          toast(line, 'error');
+        }
+      },
+    },
+  );
+}
 
-  setLoading(btn, true, 'Mixing...');
-  try {
-    const data = await api('POST', '/api/music/mix', {
-      project: state.project,
-      instrumental_vol: ivol,
-      vocal_vol: vvol,
-    });
-    const audioEl = document.getElementById('song-audio');
-    const dlEl = document.getElementById('song-download');
-    if (audioEl) {
-      audioEl.src = `/api/music/song/${encodeURIComponent(state.project)}?t=${Date.now()}`;
-      audioEl.load();
-    }
-    if (dlEl) dlEl.href = `/api/music/song/${encodeURIComponent(state.project)}`;
-    show('song-player');
-    toast(`Final song ready! (${data.data.size_kb} KB)`, 'success');
-  } catch (err) {
-    toast(`Mix failed: ${err.message}`, 'error');
-  } finally {
-    setLoading(btn, false);
+// ---------------------------------------------------------------------------
+// Video stage
+// ---------------------------------------------------------------------------
+
+function refreshVideoStage() {
+  const s = state.status;
+  const player = $('final-player');
+  const empty = $('final-empty');
+  const title = $('final-player-title');
+
+  let base = null;
+  if (s && s.has_animation && state.project) {
+    base = `/api/animated/${encodeURIComponent(state.project)}`;
+    title.textContent = '▶️ Final music video (animated)';
+  } else if (s && s.has_animatic && state.project) {
+    base = `/api/animatic/${encodeURIComponent(state.project)}`;
+    title.textContent = '▶️ Final music video (animatic)';
   }
+  if (base) {
+    $('final-video').src = `${base}?t=${Date.now()}`;
+    $('final-download').href = base;
+    player.hidden = false;
+    empty.hidden = true;
+  } else {
+    player.hidden = true;
+    empty.hidden = false;
+  }
+  renderSummary();
 }
 
-async function runLipsync() {
-  if (!state.project) { toast('Please select a project first', 'error'); return; }
-
-  const logEl = document.getElementById('lipsync-log');
-  if (!logEl) return;
-
-  // CSS uses .log-panel.visible to show — add class, clear text
-  logEl.classList.add('visible');
-  logEl.textContent = '';
-
-  const btn = document.getElementById('run-lipsync-btn');
-  setLoading(btn, true, 'Running lip-sync...');
-
-  const source = new EventSource(`/api/lipsync/run?project=${encodeURIComponent(state.project)}`);
-  let streamDone = false;
-
-  source.onmessage = event => {
-    const line = event.data;
-    if (line === 'DONE') {
-      streamDone = true;
-      source.close();
-      setLoading(btn, false);
-      toast('Lip-sync complete!', 'success');
-      loadShotTable();
-    } else if (line.startsWith('ERROR')) {
-      streamDone = true;
-      source.close();
-      setLoading(btn, false);
-      toast(`Lip-sync error: ${line}`, 'error');
-    } else {
-      appendLog(logEl, line);
-    }
-  };
-
-  source.onerror = () => {
-    if (streamDone) return;
-    source.close();
-    setLoading(btn, false);
-    toast('Lip-sync stream disconnected', 'error');
-  };
+function renderSummary() {
+  const s = state.status;
+  const ul = $('summary-list');
+  ul.innerHTML = '';
+  const rows = [
+    ['Project', state.project || '—', !!state.project],
+    ['Lyrics', s && s.has_lyrics ? 'Written' : 'Not yet', !!(s && s.has_lyrics)],
+    ['Song', s && s.has_song ? 'Generated (sung vocals)' : 'Not yet', !!(s && s.has_song)],
+    ['Storyboard', s && s.image_count ? `${s.image_count} images` : 'Not yet', !!(s && s.image_count)],
+    ['Animation', s && s.has_animation ? 'Built' : 'Not yet', !!(s && s.has_animation)],
+    ['Final video', s && (s.has_animatic || s.has_animation) ? 'Ready' : 'Not yet', !!(s && (s.has_animatic || s.has_animation))],
+  ];
+  rows.forEach(([k, v, ok]) => {
+    ul.appendChild(el('li', { class: ok ? 'ok' : '' },
+      el('span', { class: 'sum-k', text: k }),
+      el('span', { class: 'sum-v', text: v }),
+    ));
+  });
 }
 
-// ---------------------------------------------------------------------------
-// Video tab
-// ---------------------------------------------------------------------------
-
-async function buildAnimatic() {
-  if (!state.project) { toast('Please select a project first', 'error'); return; }
-
-  const logEl = document.getElementById('animatic-log');
-  if (!logEl) return;
-
-  const btn = document.getElementById('build-animatic-btn');
-  // HTML: <video id="animatic-video"> (not "video-player")
-  const videoEl = document.getElementById('animatic-video');
-  const videoSection = document.getElementById('video-player-section');
-
-  logEl.classList.add('visible');
-  logEl.textContent = '';
-
-  // CSS hides #video-player-section with display:none
-  if (videoSection) videoSection.style.display = 'none';
-
-  setLoading(btn, true, 'Building animatic...');
-
-  const source = new EventSource(`/api/animatic/build?project=${encodeURIComponent(state.project)}`);
-  let streamDone = false;
-
-  source.onmessage = event => {
-    const line = event.data;
-    if (line === 'DONE') {
-      streamDone = true;
-      source.close();
-      setLoading(btn, false);
-      if (videoSection) videoSection.style.display = 'block';
-      if (videoEl) {
-        videoEl.src = `/api/animatic/${state.project}`;
-        videoEl.load();
-      }
-      const downloadBtn = document.getElementById('download-video-btn');
-      if (downloadBtn) downloadBtn.href = `/api/animatic/${state.project}`;
-      toast('Animatic ready!', 'success');
-    } else if (line.startsWith('ERROR')) {
-      streamDone = true;
-      source.close();
-      setLoading(btn, false);
-      toast(`Build error: ${line}`, 'error');
-    } else {
-      appendLog(logEl, line);
-    }
-  };
-
-  source.onerror = () => {
-    if (streamDone) return;
-    source.close();
-    setLoading(btn, false);
-    toast('Build stream disconnected', 'error');
-  };
+function buildVideo() {
+  if (!requireProject()) return;
+  const btn = $('build-video-btn');
+  busy(btn, true, 'Building…');
+  runSSE(
+    `/api/animatic/build?project=${encodeURIComponent(state.project)}`,
+    {
+      stage: 'video',
+      label: `Final video — assembling (${state.project})`,
+      onDone: async () => {
+        busy(btn, false);
+        toast('Final video ready!', 'success');
+        await hydrateStatus();
+        refreshVideoStage();
+      },
+      onError: (line) => { busy(btn, false); toast(line, 'error'); },
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
-// Health check
+// Health
 // ---------------------------------------------------------------------------
 
 async function checkHealth() {
   try {
-    // /api/health uses the standard {ok, data} envelope like every other route.
-    const health = (await api('GET', '/api/health')).data || {};
-
-    // HTML: <span class="status-dot" id="dot-comfyui"> (not "comfyui-status")
-    const dotComfy = document.getElementById('dot-comfyui');
-    if (dotComfy) {
-      dotComfy.className = `status-dot ${health.comfyui ? 'online' : 'offline'}`;
-    }
-
-    // Merge project list from health into dropdown
-    if (Array.isArray(health.projects) && health.projects.length > 0) {
-      const selectEl = document.getElementById('project-select');
-      if (selectEl) {
-        health.projects.forEach(name => {
-          if (!Array.from(selectEl.options).some(o => o.value === name)) {
-            const opt = document.createElement('option');
-            opt.value = name;
-            opt.textContent = name;
-            selectEl.appendChild(opt);
-          }
-        });
-        if (state.project) selectEl.value = state.project;
-      }
-    }
-  } catch {
-    const dotComfy = document.getElementById('dot-comfyui');
-    if (dotComfy) dotComfy.className = 'status-dot offline';
+    const h = await api('GET', '/api/health');
+    $('dot-comfyui').className = `svc-dot ${h.comfyui ? 'online' : 'offline'}`;
+    $('dot-gpu').className = `svc-dot ${h.gpu ? 'online' : 'offline'}`;
+  } catch (_) {
+    $('dot-comfyui').className = 'svc-dot offline';
+    $('dot-gpu').className = 'svc-dot offline';
   }
 }
 
 // ---------------------------------------------------------------------------
-// Init
+// Guards
 // ---------------------------------------------------------------------------
 
-async function restoreSession() {
-  const saved = loadPersistedState();
-  if (!saved) return;
+function requireProject() {
+  if (!state.project) { toast('Select a project first', 'warn'); focusStage('project'); return false; }
+  return true;
+}
 
-  // Restore project silently (no toast — user didn't just select it)
-  if (saved.project) {
-    state.project = saved.project;
-    const selectEl = document.getElementById('project-select');
-    if (selectEl) selectEl.value = saved.project;
-    document.querySelectorAll('#project-list li:not(.projects-empty)').forEach(li => {
-      li.classList.toggle('selected', li.textContent === saved.project);
-    });
-    const hintSpan = document.querySelector('#project-hint .hint-text');
-    if (hintSpan) hintSpan.textContent = `Project "${saved.project}" selected. Click a tab in the sidebar to continue.`;
-
-    // Load saved prompts from disk
-    try {
-      const data = await api('GET', `/api/prompts/${encodeURIComponent(saved.project)}`);
-      state.prompts = data.data || [];
-      if (state.prompts.length) {
-        const listEl = document.getElementById('prompts-list');
-        if (listEl) {
-          listEl.style.display = 'block';
-          listEl.innerHTML = state.prompts.map(renderPromptCard).join('');
-          state.prompts.forEach(shot => {
-            const ta = listEl.querySelector(`#prompt-${CSS.escape(shot.shot_id)}`);
-            if (ta) ta.value = shot.prompt || '';
-          });
-        }
-      }
-    } catch (_) {}
-
-    // Reload gallery images from disk
-    loadGallery();
+let _configOk = null;
+async function preflight() {
+  if (_configOk === null) {
+    try { await api('GET', '/api/config/check'); _configOk = true; }
+    catch (err) { _configOk = false; toast(`API key error: ${err.message}`, 'error'); return false; }
+  } else if (!_configOk) {
+    toast('ANTHROPIC_API_KEY not configured — add it to .env and restart', 'error');
+    return false;
   }
+  return true;
+}
 
-  // Restore lyrics — prefer localStorage, fall back to disk
-  let restoredLyrics = saved.lyrics || null;
-  if (!restoredLyrics && saved.project) {
-    try {
-      const ld = await api('GET', `/api/lyrics/${encodeURIComponent(saved.project)}`);
-      if (ld.data) restoredLyrics = ld.data;
-    } catch (_) {}
-  }
-  if (restoredLyrics) {
-    state.lyrics = restoredLyrics;
-    const textarea = document.getElementById('lyrics-textarea');
-    if (textarea) textarea.value = restoredLyrics;
-    show('lyrics-result');
-    show('chords-section');
-  }
+// ---------------------------------------------------------------------------
+// Wiring
+// ---------------------------------------------------------------------------
 
-  // Restore active tab
-  if (saved.tab) switchTab(saved.tab);
+function wire() {
+  $('create-project-btn').addEventListener('click', createProject);
+  $('new-project-btn').addEventListener('click', () => { focusStage('project'); $('project-name').focus(); });
+  $('project-select').addEventListener('change', (e) => { if (e.target.value) selectProject(e.target.value); });
+
+  $('generate-lyrics-btn').addEventListener('click', generateLyrics);
+  $('save-lyrics-btn').addEventListener('click', () => saveLyrics(false));
+  $('lyrics-textarea').addEventListener('blur', () => saveLyrics(true));
+  $('lyrics-language').addEventListener('change', () => saveLyrics(true));
+  $('copy-lyrics-btn').addEventListener('click', () => {
+    navigator.clipboard.writeText($('lyrics-textarea').value)
+      .then(() => toast('Lyrics copied', 'success')).catch(() => toast('Copy failed', 'error'));
+  });
+  $('generate-chords-btn').addEventListener('click', generateChords);
+
+  $('generate-song-btn').addEventListener('click', generateSong);
+  $('generate-prompts-btn').addEventListener('click', generatePrompts);
+  $('generate-images-btn').addEventListener('click', generateImages);
+  $('refresh-gallery-btn').addEventListener('click', loadGallery);
+  $('build-animation-btn').addEventListener('click', buildAnimation);
+  $('build-video-btn').addEventListener('click', buildVideo);
+
+  $('final-video-btn').addEventListener('click', () => focusStage('video'));
+  $('mb-video-btn').addEventListener('click', () => focusStage('video'));
+
+  $('activity-toggle').addEventListener('click', () => openDrawer($('activity-drawer').hidden));
+  $('clear-log-btn').addEventListener('click', () => { $('activity-log').textContent = ''; });
+
+  $('rail-collapse').addEventListener('click', () => {
+    const rail = $('rail');
+    rail.classList.toggle('collapsed');
+    $('rail-collapse').textContent = rail.classList.contains('collapsed') ? '›' : '‹';
+  });
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  switchTab('project');
-  await loadProjectList();
-  await restoreSession();
+  wire();
+  renderStepper();
+  focusStage('project');
+  await loadProjects();
   checkHealth();
   setInterval(checkHealth, 30000);
 
-  // Prevent form submission (buttons are type="submit" — would trigger GET reload)
-  document.getElementById('create-project-form')?.addEventListener('submit', e => e.preventDefault());
-  document.getElementById('lyrics-form')?.addEventListener('submit', e => e.preventDefault());
-
-  // Button handlers
-  document.getElementById('create-project-btn')?.addEventListener('click', createProject);
-  document.getElementById('generate-lyrics-btn')?.addEventListener('click', generateLyrics);
-  document.getElementById('generate-chords-btn')?.addEventListener('click', generateChords);
-  document.getElementById('generate-prompts-btn')?.addEventListener('click', generatePrompts);
-  document.getElementById('generate-images-btn')?.addEventListener('click', generateImages);
-  document.getElementById('refresh-gallery-btn')?.addEventListener('click', loadGallery);
-  document.getElementById('refresh-shots-btn')?.addEventListener('click', loadShotTable);
-  document.getElementById('gen-instrumental-btn')?.addEventListener('click', generateInstrumental);
-  document.getElementById('upload-vocals-btn')?.addEventListener('click', uploadVocals);
-  document.getElementById('mix-song-btn')?.addEventListener('click', mixSong);
-  document.getElementById('run-lipsync-btn')?.addEventListener('click', runLipsync);
-
-  // Volume slider labels
-  document.getElementById('mix-ivol')?.addEventListener('input', e => {
-    const label = document.getElementById('mix-ivol-label');
-    if (label) label.textContent = e.target.value + '%';
-  });
-  document.getElementById('mix-vvol')?.addEventListener('input', e => {
-    const label = document.getElementById('mix-vvol-label');
-    if (label) label.textContent = e.target.value + '%';
-  });
-  document.getElementById('build-animatic-btn')?.addEventListener('click', buildAnimatic);
-
-  // Sidebar nav — HTML uses <li class="nav-item"> NOT <a> tags
-  document.querySelectorAll('.sidebar-nav .nav-item').forEach(item => {
-    item.addEventListener('click', () => switchTab(item.dataset.tab));
-    item.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); switchTab(item.dataset.tab); }
-    });
-  });
-
-  // Header project dropdown
-  document.getElementById('project-select')?.addEventListener('change', e => {
-    if (e.target.value) setProject(e.target.value);
-  });
-
-  // Copy buttons
-  document.getElementById('copy-lyrics-btn')?.addEventListener('click', () => {
-    const ta = document.getElementById('lyrics-textarea');
-    copyToClipboard(ta ? ta.value : '', 'Lyrics');
-  });
-
-  document.getElementById('copy-chords-btn')?.addEventListener('click', () => {
-    const pre = document.getElementById('chords-pre');
-    copyToClipboard(pre ? pre.textContent : '', 'Chords');
-  });
+  // Optional deep-link: ?p=<project>&s=<stage> selects a project and focuses a
+  // stage on load, so a particular step can be bookmarked or shared.
+  const params = new URLSearchParams(location.search);
+  const p = params.get('p');
+  if (p) {
+    const known = Array.from($('project-select').options).some(o => o.value === p);
+    if (known) {
+      await selectProject(p);
+      const s = params.get('s');
+      if (s && STAGES.some(st => st.id === s)) {
+        const { locked } = stageState(s);
+        if (!locked) focusStage(s);
+      }
+    }
+  }
 });

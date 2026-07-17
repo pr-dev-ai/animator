@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import subprocess
 from collections.abc import Generator
 from pathlib import Path
 
@@ -66,6 +68,36 @@ def _err(message: str, status: int = 500) -> tuple[Response, int]:
     return jsonify({"ok": False, "error": message}), status
 
 
+# Only English and Hindi are verified-working singing languages (see music_ace).
+_LANGUAGE_CODES = {"english": "en", "hindi": "hi", "en": "en", "hi": "hi"}
+
+
+def _language_code(value: str) -> str:
+    """Map a language name or code ("English"/"en"/"Hindi"/"hi") to an ACE-Step code.
+
+    Anything unrecognised degrades to "en" — the same fallback music_ace applies —
+    so an odd value never strands the caller.
+    """
+    return _LANGUAGE_CODES.get((value or "").strip().lower(), "en")
+
+
+def _persist_language(project: str, value: str) -> None:
+    """Write projects/<project>/language.txt (code form) so Music can read it later.
+
+    Best-effort: a write failure must not abort lyric saving or song generation.
+    Uses pipeline_api.project_dir() so a traversal name (e.g. "../outputs") is
+    rejected rather than steering the write outside projects/.
+    """
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        base = pipeline_api.project_dir(project)  # raises ValueError on a bad name
+        if base.is_dir():
+            (base / "language.txt").write_text(_language_code(value), encoding="utf-8")
+    except Exception as exc:  # pragma: no cover - bad name or disk hiccup, not fatal
+        logger.warning("Could not persist language for %s: %s", project, exc)
+
+
 # ---------------------------------------------------------------------------
 # Routes — static page
 # ---------------------------------------------------------------------------
@@ -81,6 +113,25 @@ def index() -> str:
 # ---------------------------------------------------------------------------
 
 
+def _gpu_available() -> bool:
+    """Best-effort check that an NVIDIA GPU is present via nvidia-smi.
+
+    Returns False on any failure (missing binary, timeout, non-zero exit) so a
+    machine without the CUDA toolkit simply shows the GPU dot as offline rather
+    than erroring the whole health poll.
+    """
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "-L"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        return result.returncode == 0 and "GPU" in result.stdout
+    except Exception:
+        return False
+
+
 @app.route("/api/health")
 def health() -> Response | tuple[Response, int]:
     try:
@@ -88,7 +139,8 @@ def health() -> Response | tuple[Response, int]:
 
         projects = pipeline_api.list_projects()
         comfyui_ok = pipeline_api.check_comfyui_health()
-        return _ok({"comfyui": comfyui_ok, "projects": projects})
+        gpu_ok = _gpu_available()
+        return _ok({"comfyui": comfyui_ok, "gpu": gpu_ok, "projects": projects})
     except Exception as exc:
         logger.exception("Health check failed")
         return _err(str(exc), 503)
@@ -326,6 +378,43 @@ def audio_import() -> Response | tuple[Response, int]:
 
 @app.route("/api/music/generate")
 def music_generate() -> Response | tuple[Response, int]:
+    """SSE — generate a full song with SUNG VOCALS via ACE-Step 1.5.
+
+    This is the studio's primary music action: it reads projects/<p>/lyrics.txt
+    (plus chords/arrangement for tempo & key) and writes outputs/<p>_song.wav.
+    ``language`` (en/hi) may be passed explicitly; otherwise generate_song reads
+    projects/<p>/language.txt, falling back to English.
+    """
+    project = request.args.get("project", "").strip()
+    language = request.args.get("language", "").strip() or None
+    if not project:
+        return _err("'project' query param is required", 400)
+    if not (REPO_ROOT / "projects" / project).is_dir():
+        return _err(f"Project '{project}' not found", 404)
+    try:
+        from web_ui import music_ace
+
+        # Persist the chosen language so a later run (and the status route) agree
+        # with what was actually sung.
+        if language:
+            _persist_language(project, language)
+
+        def _song(proj: str) -> Generator[str, None, None]:
+            yield from music_ace.generate_song(proj, language=language)
+
+        return _sse_stream(_song, project)
+    except Exception as exc:
+        logger.exception("music_generate failed")
+        return _err(str(exc))
+
+
+@app.route("/api/music/instrumental/build")
+def music_instrumental_build() -> Response | tuple[Response, int]:
+    """SSE — synthesize a chord-based instrumental (no vocals) via music_gen.
+
+    Retained for the instrumental + recorded-vocals + mix workflow; the studio's
+    main Music stage uses /api/music/generate (sung vocals) instead.
+    """
     project = request.args.get("project", "").strip()
     if not project:
         return _err("'project' query param is required", 400)
@@ -333,9 +422,10 @@ def music_generate() -> Response | tuple[Response, int]:
         return _err(f"Project '{project}' not found", 404)
     try:
         from web_ui import pipeline_api
+
         return _sse_stream(pipeline_api.generate_instrumental, project)
     except Exception as exc:
-        logger.exception("music_generate failed")
+        logger.exception("music_instrumental_build failed")
         return _err(str(exc))
 
 
@@ -450,6 +540,91 @@ def load_lyrics(project: str) -> Response | tuple[Response, int]:
         return _err(str(exc))
 
 
+@app.route("/api/lyrics/save", methods=["POST"])
+def save_lyrics() -> Response | tuple[Response, int]:
+    """Persist edited lyrics (and the chosen language) for a project.
+
+    Writes projects/<p>/lyrics.txt and projects/<p>/language.txt so the Music
+    stage (generate_song) can read both without the client re-passing them.
+    """
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        body = request.get_json(force=True) or {}
+        project: str = body.get("project", "").strip()
+        lyrics: str = body.get("lyrics", "")
+        language: str = body.get("language", "").strip()
+
+        if not project:
+            return _err("'project' is required", 400)
+        # project_dir() validates the name (letters/digits/-/_) so a body value
+        # like "../../outputs" cannot steer this write outside projects/.
+        try:
+            base = pipeline_api.project_dir(project)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        if not base.is_dir():
+            return _err(f"Project '{project}' not found", 404)
+        if not lyrics.strip():
+            return _err("'lyrics' cannot be empty", 400)
+
+        (base / "lyrics.txt").write_text(lyrics.strip(), encoding="utf-8")
+        if language:
+            _persist_language(project, language)
+        return _ok({"saved": True, "language": _language_code(language) if language else None})
+    except Exception as exc:
+        logger.exception("save_lyrics failed")
+        return _err(str(exc))
+
+
+@app.route("/api/project/<string:project>/status")
+def project_status(project: str) -> Response | tuple[Response, int]:
+    """One-shot status snapshot used to hydrate the pipeline stepper.
+
+    Reports which stage artifacts exist on disk so the client can colour each
+    stepper dot (done / available / locked) without a request per stage.
+    """
+    try:
+        from web_ui import pipeline_api  # lazy import
+
+        try:
+            base = pipeline_api.project_dir(project)  # validates the name
+        except ValueError as exc:
+            return _err(str(exc), 400)
+        if not base.is_dir():
+            return _err(f"Project '{project}' not found", 404)
+        outputs = REPO_ROOT / "outputs"
+
+        lyrics_file = base / "lyrics.txt"
+        has_lyrics = lyrics_file.exists() and bool(lyrics_file.read_text(encoding="utf-8").strip())
+
+        lang_file = base / "language.txt"
+        language = lang_file.read_text(encoding="utf-8").strip() if lang_file.exists() else None
+
+        prompts_file = base / "prompts" / "storyboards.json"
+        prompt_count = 0
+        if prompts_file.exists():
+            try:
+                prompt_count = len(json.loads(prompts_file.read_text(encoding="utf-8")))
+            except Exception:
+                prompt_count = 0
+
+        images = pipeline_api.get_storyboard_images(project)
+
+        return _ok({
+            "has_lyrics": bool(has_lyrics),
+            "language": language,
+            "prompt_count": prompt_count,
+            "image_count": len(images),
+            "has_song": (outputs / f"{project}_song.wav").exists(),
+            "has_animation": (outputs / f"{project}_animated.mp4").exists(),
+            "has_animatic": (outputs / f"{project}_animatic.mp4").exists(),
+        })
+    except Exception as exc:
+        logger.exception("project_status failed for %s", project)
+        return _err(str(exc))
+
+
 @app.route("/api/prompts/<string:project>")
 def load_prompts(project: str) -> Response | tuple[Response, int]:
     """Return previously saved storyboard prompts for a project (no Claude call)."""
@@ -509,6 +684,68 @@ def animatic_build() -> Response | tuple[Response, int]:
         return _sse_stream(pipeline_api.build_animatic, project)
     except Exception as exc:
         logger.exception("animatic_build setup failed")
+        return _err(str(exc))
+
+
+@app.route("/api/animation/build")
+def animation_build() -> Response | tuple[Response, int]:
+    """SSE — build the 2.5D Blender animation, writing outputs/<p>_animated.mp4.
+
+    The animation pipeline lives in web_ui/animation_api.py, authored by a sibling
+    agent and merged separately. It may be absent when this server first starts, so
+    the import is deferred and its failure is reported as a clean, non-crashing SSE
+    message rather than a 500 — the Animate stage then shows a "coming soon" state.
+    """
+    project = request.args.get("project", "").strip()
+    if not project:
+        return _err("'project' query param is required", 400)
+    if not (REPO_ROOT / "projects" / project).is_dir():
+        return _err(f"Project '{project}' not found", 404)
+
+    try:
+        from web_ui import animation_api  # type: ignore
+    except Exception:
+        logger.info("animation_api not available yet — returning graceful SSE notice")
+
+        def _unavailable(_proj: str) -> Generator[str, None, None]:
+            yield ("ERROR: The animation module is not available yet. "
+                   "The 2.5D Blender pipeline (web_ui/animation_api.py) has not been "
+                   "installed on this server. This stage will light up once it lands.")
+
+        return _sse_stream(_unavailable, project)
+
+    build_fn = getattr(animation_api, "build_music_video", None)
+    if build_fn is None:
+        def _no_fn(_proj: str) -> Generator[str, None, None]:
+            yield ("ERROR: animation_api is present but exposes no build_music_video() "
+                   "generator — cannot build the animation.")
+
+        return _sse_stream(_no_fn, project)
+
+    try:
+        return _sse_stream(build_fn, project)
+    except Exception as exc:
+        logger.exception("animation_build setup failed")
+        return _err(str(exc))
+
+
+@app.route("/api/animated/<string:project>")
+def serve_animated(project: str) -> Response | tuple[Response, int]:
+    """Serve outputs/<project>_animated.mp4 with a path-traversal guard.
+
+    Mirrors serve_image's resolve-then-contain check so a crafted *project* value
+    cannot escape the outputs/ directory.
+    """
+    try:
+        outputs_dir = (REPO_ROOT / "outputs").resolve()
+        mp4_path = (outputs_dir / f"{project}_animated.mp4").resolve()
+        if not mp4_path.is_relative_to(outputs_dir):
+            return _err("Forbidden", 403)
+        if not mp4_path.exists():
+            return _err(f"No animation found for project '{project}'", 404)
+        return send_file(mp4_path, mimetype="video/mp4")
+    except Exception as exc:
+        logger.exception("serve_animated failed for %s", project)
         return _err(str(exc))
 
 
