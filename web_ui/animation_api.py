@@ -149,6 +149,40 @@ def _concat_and_mux(ffmpeg, section_mp4s, song, out_path, work_dir) -> None:
         concat.unlink(missing_ok=True)
 
 
+def _build_from_own_images(project, song, n_images) -> Generator[str, None, None]:
+    """General animation path: animate the PROJECT'S OWN storyboard images.
+
+    Interim implementation delegates to scripts/make_dailies.py, which renders a
+    lyric-synced, beat-cut motion video from the project's own images + song and
+    writes outputs/<project>_animatic.mp4.  We copy that to <project>_animated.mp4
+    so the studio's Animate stage serves the project's real content instead of the
+    hardcoded bus.  The depth-based 2.5D parallax upgrade replaces this body.
+    """
+    import blender_render  # only for its ffmpeg/tool resolvers
+    yield (f"Animating '{project}' from its own {n_images} storyboard images "
+           f"(lyric-synced motion).")
+    cmd = [sys.executable, str(SCRIPTS_DIR / "make_dailies.py"), "--project", project]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, bufsize=1)
+    for line in proc.stdout:
+        line = line.rstrip()
+        if line:
+            yield f"  {line}"
+    proc.wait()
+    if proc.returncode != 0:
+        yield f"ERROR: animation build failed (make_dailies exited {proc.returncode})"
+        return
+    animatic = OUTPUTS_DIR / f"{project}_animatic.mp4"
+    if not animatic.is_file():
+        yield f"ERROR: expected {animatic} was not produced"
+        return
+    out_path = OUTPUTS_DIR / f"{project}_animated.mp4"
+    shutil.copy2(animatic, out_path)
+    size_mb = out_path.stat().st_size / (1024 * 1024)
+    yield f"Wrote {out_path} ({size_mb:.1f} MB) from this project's own scenes"
+    yield "DONE"
+
+
 def build_music_video(project: str) -> Generator[str, None, None]:
     """Build outputs/<project>_animated.mp4 — the full-length bus music video.
 
@@ -167,8 +201,18 @@ def build_music_video(project: str) -> Generator[str, None, None]:
     if not song.is_file():
         yield f"ERROR: no song at {song} — generate the song first"
         return
+
+    # The bus scene kit is a hand-built SHOWCASE for one specific scene — it is
+    # NOT a template for arbitrary projects.  Any project that has its own
+    # storyboard images must animate THOSE, not the bus.  Only a project with no
+    # images of its own (the bus showcase) falls back to the bus kit.
+    own_images = sorted((OUTPUTS_DIR / f"{project}_storyboards").glob("*.png"))
+    if own_images:
+        yield from _build_from_own_images(project, song, len(own_images))
+        return
     if not (kit / "manifest.json").is_file():
-        yield f"ERROR: bus scene kit missing at {kit}"
+        yield (f"ERROR: project '{project}' has no storyboard images to animate "
+               f"(generate storyboards first), and the bus showcase kit is missing.")
         return
 
     import build_bus_video as bbv
