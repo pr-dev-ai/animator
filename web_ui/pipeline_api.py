@@ -439,6 +439,115 @@ def save_storyboard_prompts(project: str, prompts: list[dict]) -> None:
     logger.info("Saved storyboard prompts: %s", storyboards_md)
 
 
+# Descriptions that appear verbatim in a freshly-scaffolded (untouched)
+# shotlist.csv. If a project's shot descriptions are a subset of these, the
+# shotlist is still the template and is safe to replace with a planned one.
+# Keeping the check to descriptions (not exact-file match) means a template that
+# had its project name substituted in still reads as "untouched".
+_TEMPLATE_SHOT_DESCRIPTIONS = frozenset(
+    {
+        # kids inline fallback (scripts/create_project.py _kids_shotlist_csv)
+        "opening title card",
+        "main character is introduced",
+        "close-up of character reacting",
+        # story inline template (_story_shotlist_csv)
+        "establishing shot of main location",
+        "protagonist introduced",
+        "key moment close-up",
+        # kids_template/shotlist.csv (the 13-shot scaffold)
+        "opening title card over bright sunny meadow",
+        "bunny character singing verse 1",
+        "duck character singing verse 2",
+        "all animals dancing together from above",
+        "cat character singing verse 3",
+        "dog character singing verse 4",
+        "all animals lined up clapping and swaying",
+        "animals wave goodbye; slow pull back",
+        "establishing shot of colourful park",
+        "maincharacter enters and greets friends",
+        "maincharacter's excited close-up reaction",
+        "maincharacter and friend together",
+        "both characters run toward horizon",
+    }
+)
+
+
+def is_default_shotlist(project: str) -> bool:
+    """True if *project*'s shotlist.csv is missing, empty, or an untouched template.
+
+    Used to decide whether the Claude scene planner may (re)generate the
+    shotlist. A shotlist a user has hand-edited returns False, so their work is
+    never silently clobbered.
+    """
+    shots = get_project_shots(project)
+    if not shots:
+        return True
+    for shot in shots:
+        desc = (shot.get("description") or "").strip().lower()
+        if desc not in _TEMPLATE_SHOT_DESCRIPTIONS:
+            return False
+    return True
+
+
+def get_song_duration(project: str) -> Optional[float]:
+    """Best-effort total song length in seconds, or None if no audio exists yet.
+
+    Reads any rendered song/instrumental/vocal WAV under outputs/ with the
+    stdlib ``wave`` module — no extra dependencies, and read-only (music
+    pipeline is not touched). Returns None on any problem so callers treat the
+    duration as simply unknown.
+    """
+    import wave
+
+    out_dir = REPO_ROOT / "outputs"
+    for name in (f"{project}_song.wav", f"{project}_instrumental.wav", f"{project}_vocals.wav"):
+        wav_path = out_dir / name
+        if not wav_path.exists():
+            continue
+        try:
+            with wave.open(str(wav_path), "rb") as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+            if rate > 0 and frames > 0:
+                return frames / float(rate)
+        except Exception as exc:
+            logger.warning("Could not read duration from %s: %s", wav_path, exc)
+    return None
+
+
+def save_planned_shotlist(project: str, scenes: list[dict]) -> None:
+    """Persist a Claude scene plan to projects/<project>/shotlist.csv.
+
+    Writes the exact schema the rest of the app reads —
+    ``shot_id,description,camera,duration,notes`` — with each scene's
+    ``lyric_ref`` stored in the ``notes`` column. Written atomically so a crash
+    mid-write cannot leave a truncated shotlist.
+    """
+    pdir = project_dir(project)
+    if not pdir.is_dir():
+        raise ValueError(f"Project '{project}' not found")
+    if not scenes:
+        raise ValueError("Refusing to write an empty shotlist")
+
+    shotlist_csv = pdir / "shotlist.csv"
+    tmp = shotlist_csv.with_suffix(".csv.tmp")
+    with open(tmp, "w", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["shot_id", "description", "camera", "duration", "notes"])
+        for scene in scenes:
+            writer.writerow(
+                [
+                    scene.get("shot_id", ""),
+                    scene.get("description", ""),
+                    scene.get("camera", "Medium"),
+                    scene.get("duration", ""),
+                    scene.get("lyric_ref", ""),
+                ]
+            )
+    tmp.replace(shotlist_csv)
+    logger.info("Saved planned shotlist (%d scenes): %s", len(scenes), shotlist_csv)
+
+
 def run_lipsync(project: str) -> Generator[str, None, None]:
     """Generator that runs gen_lipsync.py via subprocess and yields log lines.
 

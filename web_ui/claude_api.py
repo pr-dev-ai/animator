@@ -1,6 +1,8 @@
 import os
 import json
 import logging
+import math
+import re
 from pathlib import Path
 
 from anthropic import Anthropic
@@ -273,6 +275,237 @@ def generate_music_arrangement(
     except json.JSONDecodeError:
         cycle = (chords or ["C", "G", "Am", "F"]) * 4
         return {"tempo_bpm": tempo_bpm, "bars": [{"chord": c, "beats": 4} for c in cycle]}
+
+
+_VALID_CAMERAS = ("Wide", "Medium", "Close")
+
+# Guard rails on the scene count Claude may return. A kids song broken roughly
+# one-scene-per-line tops out well under 40; anything past that is a runaway
+# answer, and fewer than 2 is not a storyboard. These only clamp the extremes —
+# the count inside this band is entirely Claude's call.
+_MIN_SCENES = 2
+_MAX_SCENES = 40
+
+# Fallback pacing when no song_duration is given: seconds of screen time per
+# lyric line. Kids songs sit around 3–5s per sung line.
+_SECONDS_PER_LINE = 4.0
+
+
+def _coerce_camera(value) -> str:
+    """Map an arbitrary camera string to one of _VALID_CAMERAS (default Medium)."""
+    if not isinstance(value, str):
+        return "Medium"
+    v = value.strip().lower()
+    if v.startswith("w"):
+        return "Wide"
+    if v.startswith("c") or "close" in v:
+        return "Close"
+    return "Medium"
+
+
+def _coerce_duration(value, fallback: float = _SECONDS_PER_LINE) -> float:
+    """Return *value* as a positive float duration in seconds, else *fallback*."""
+    try:
+        d = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    # Reject non-positive, NaN, and inf. json.loads accepts Infinity/NaN, and an
+    # inf here would poison the duration rescale (factor -> 0, every scene 1.0s).
+    if not math.isfinite(d) or d <= 0:
+        return fallback
+    return d
+
+
+def _fallback_scene_list(lyrics_text: str, song_duration: float | None) -> list[dict]:
+    """Build a sane, still-dynamic scene list without calling Claude.
+
+    One scene per non-empty lyric line (so the count still reflects the song's
+    length), clamped to [_MIN_SCENES, _MAX_SCENES]. Durations spread evenly over
+    song_duration when given, else a per-line default.
+    """
+    lines = [ln.strip() for ln in lyrics_text.splitlines() if ln.strip()]
+    # Drop obvious section markers like "Verse 1:" / "Chorus:" so they don't
+    # become their own (empty) scenes.
+    lines = [ln for ln in lines if not re.fullmatch(r"(verse|chorus|bridge|outro|intro)\s*\d*\s*:?", ln, re.IGNORECASE)]
+    if not lines:
+        lines = ["Opening scene", "Closing scene"]
+
+    n = max(_MIN_SCENES, min(_MAX_SCENES, len(lines)))
+    lines = lines[:n]
+    if song_duration and song_duration > 0:
+        per = round(song_duration / n, 1)
+    else:
+        per = _SECONDS_PER_LINE
+
+    cameras = ("Wide", "Medium", "Medium", "Close")
+    scenes: list[dict] = []
+    for i, line in enumerate(lines):
+        scenes.append(
+            {
+                "shot_id": f"SH{(i + 1) * 10:03d}",
+                "description": line,
+                "camera": cameras[i % len(cameras)],
+                "duration": per,
+                "lyric_ref": line,
+            }
+        )
+    return scenes
+
+
+def _normalize_scenes(raw_scenes: list, song_duration: float | None) -> list[dict]:
+    """Clean Claude's scene list: sequential ids, valid cameras/durations, scaled.
+
+    - Assigns clean sequential shot_ids (SH010, SH020, …) regardless of what
+      Claude returned, so downstream shot lookup is never ambiguous.
+    - Clamps the count to [_MIN_SCENES, _MAX_SCENES].
+    - When song_duration is given, rescales durations proportionally so they sum
+      to approximately song_duration (the scenes then cover the whole song).
+    """
+    scenes: list[dict] = []
+    for item in raw_scenes:
+        if not isinstance(item, dict):
+            continue
+        desc = str(item.get("description", "")).strip()
+        lyric_ref = str(item.get("lyric_ref", "")).strip()
+        if not desc and not lyric_ref:
+            continue
+        scenes.append(
+            {
+                "description": desc or lyric_ref,
+                "camera": _coerce_camera(item.get("camera")),
+                "duration": _coerce_duration(item.get("duration")),
+                "lyric_ref": lyric_ref,
+            }
+        )
+
+    scenes = scenes[:_MAX_SCENES]
+    if len(scenes) < _MIN_SCENES:
+        return []  # too little to trust — caller falls back
+
+    # Rescale durations to hit the target song length when we have one.
+    if song_duration and song_duration > 0:
+        total = sum(s["duration"] for s in scenes) or 1.0
+        factor = song_duration / total
+        for s in scenes:
+            s["duration"] = max(1.0, round(s["duration"] * factor, 1))
+
+    # Assign clean sequential ids last, overwriting anything Claude chose.
+    for i, s in enumerate(scenes):
+        s["shot_id"] = f"SH{(i + 1) * 10:03d}"
+
+    # Keep a stable key order for the returned dicts.
+    return [
+        {
+            "shot_id": s["shot_id"],
+            "description": s["description"],
+            "camera": s["camera"],
+            "duration": s["duration"],
+            "lyric_ref": s["lyric_ref"],
+        }
+        for s in scenes
+    ]
+
+
+def plan_scenes(
+    lyrics_text: str,
+    style: str,
+    language: str = "English",
+    song_duration: float | None = None,
+) -> list[dict]:
+    """Let Claude decide how many scenes a music video needs and what each is.
+
+    Reads the song's lyrics (and its length when known) and returns a scene list
+    of Claude's chosen length — a short song gets fewer scenes, a long one more.
+    The count is NOT fixed by a template; it tracks the lyric structure.
+
+    Args:
+        lyrics_text: The full song lyrics as a string.
+        style: Visual/musical style descriptor (e.g. "upbeat", "lullaby").
+        language: Language of the lyrics (for scene descriptions; default English).
+        song_duration: Optional total song length in seconds. When given, scene
+            durations are scaled to sum to approximately this value.
+
+    Returns:
+        List of scene dicts, each with keys:
+            shot_id (str, sequential SH010/SH020/…), description (str),
+            camera ("Wide"|"Medium"|"Close"), duration (float seconds),
+            lyric_ref (str, the lyric line/phrase the scene illustrates).
+
+    Never raises for a bad/empty Claude response — it degrades to a sane,
+    still-song-shaped fallback scene list instead.
+    """
+    check_api_key()
+    if not lyrics_text or not lyrics_text.strip():
+        raise ValueError("'lyrics_text' cannot be empty — generate or paste lyrics first")
+
+    lyrics_text = lyrics_text.strip()
+    style = (style or "").strip() or "bright, cheerful kids animation"
+    language = (language or "English").strip() or "English"
+
+    client = _get_client()
+    system_prompt = (
+        "You are the director of a children's animated music video. "
+        "Given a song's lyrics, you break it into a sequence of visual scenes for a "
+        "storyboard. YOU decide how many scenes the video needs based on the song's "
+        "structure — its verses, chorus, and lines. A short song needs only a few "
+        "scenes; a long one needs more. Aim for roughly one scene per lyric line or "
+        "couplet, but use your judgement so each scene shows one clear visual moment. "
+        "Every scene must be safe and age-appropriate for kids aged 3-8."
+    )
+
+    duration_note = (
+        f"The song is about {song_duration:.0f} seconds long — choose scene "
+        "durations (in seconds) that add up to roughly that total so the scenes "
+        "cover the whole song.\n"
+        if song_duration and song_duration > 0
+        else "Give each scene a sensible duration in seconds (kids-song lines "
+        "run about 3-5 seconds).\n"
+    )
+
+    user_prompt = (
+        f"Plan the scenes for a {style} children's music video.\n"
+        f"Lyrics language: {language}.\n"
+        f"{duration_note}"
+        "Decide how many scenes best fit these lyrics — do NOT pad to a fixed "
+        "number. Walk through the song in order, one scene per lyric line or "
+        "couplet.\n\n"
+        "Return a JSON array where each element has keys:\n"
+        '  "description" (string: what is visually happening in the scene),\n'
+        '  "camera" (string: exactly one of "Wide", "Medium", "Close"),\n'
+        '  "duration" (number: seconds of screen time for this scene),\n'
+        '  "lyric_ref" (string: the exact lyric line or phrase this scene '
+        "illustrates).\n\n"
+        "Output only the JSON array with no additional text.\n\n"
+        f"Lyrics:\n{lyrics_text}"
+    )
+
+    try:
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+    except Exception as exc:
+        logger.warning("plan_scenes: Claude call failed (%s); using fallback", exc)
+        return _fallback_scene_list(lyrics_text, song_duration)
+
+    raw_text = _extract_text(response)
+    logger.debug("plan_scenes raw response: %s", raw_text)
+
+    try:
+        parsed = json.loads(_strip_fences(raw_text))
+        if not isinstance(parsed, list):
+            raise json.JSONDecodeError("expected a JSON array", raw_text, 0)
+    except json.JSONDecodeError:
+        logger.warning("plan_scenes: could not parse JSON; using fallback")
+        return _fallback_scene_list(lyrics_text, song_duration)
+
+    scenes = _normalize_scenes(parsed, song_duration)
+    if not scenes:
+        logger.warning("plan_scenes: normalized scene list too small; using fallback")
+        return _fallback_scene_list(lyrics_text, song_duration)
+    return scenes
 
 
 def generate_storyboard_prompts(

@@ -303,6 +303,12 @@ def generate_prompts() -> Response | tuple[Response, int]:
         project: str = body.get("project", "").strip()
         style: str = body.get("style", "")
         lyrics: str = body.get("lyrics", "").strip()
+        language: str = body.get("language", "English").strip() or "English"
+        # replan: "auto" (default) plans a fresh shotlist only when the current
+        # one is missing/untouched-template; "true"/"1" forces a replan; anything
+        # else ("false"/"0") keeps the existing shotlist as-is. Auto mode never
+        # clobbers a user's hand-edited shotlist.
+        replan_raw = str(body.get("replan", "auto")).strip().lower()
 
         # Validate before touching Claude
         if not project:
@@ -310,6 +316,28 @@ def generate_prompts() -> Response | tuple[Response, int]:
         project_dir = REPO_ROOT / "projects" / project
         if not project_dir.is_dir():
             return _err(f"Project '{project}' not found — create it in the Project tab first", 404)
+
+        # Save lyrics to disk so they persist across server restarts, and so the
+        # scene planner below sees the latest lyrics.
+        if lyrics:
+            lyrics_path = project_dir / "lyrics.txt"
+            lyrics_path.write_text(lyrics, encoding="utf-8")
+        elif (project_dir / "lyrics.txt").exists():
+            lyrics = (project_dir / "lyrics.txt").read_text(encoding="utf-8").strip()
+
+        # Dynamic scene planning: let Claude decide how many scenes (and what
+        # each is) from the lyrics, then persist that as shotlist.csv — instead
+        # of the fixed scaffolded template. Only (re)plan when we have lyrics and
+        # either the caller forced it or the shotlist is still the untouched
+        # template (backward compatible: a custom shotlist is left alone).
+        force_replan = replan_raw in ("true", "1", "yes")
+        allow_replan = replan_raw not in ("false", "0", "no")
+        if lyrics and allow_replan and (force_replan or pipeline_api.is_default_shotlist(project)):
+            song_duration = pipeline_api.get_song_duration(project)
+            style_for_plan = style or pipeline_api.read_styleguide(project) or "kids animation"
+            scenes = claude_api.plan_scenes(lyrics, style_for_plan, language, song_duration)
+            if scenes:
+                pipeline_api.save_planned_shotlist(project, scenes)
 
         shots = pipeline_api.get_project_shots(project)
         if not shots:
@@ -324,13 +352,6 @@ def generate_prompts() -> Response | tuple[Response, int]:
             style_guide = f"Style: {style}\n\n{style_guide}"
         elif style:
             style_guide = style
-
-        # Save lyrics to disk so they persist across server restarts
-        if lyrics:
-            lyrics_path = project_dir / "lyrics.txt"
-            lyrics_path.write_text(lyrics, encoding="utf-8")
-        elif (project_dir / "lyrics.txt").exists():
-            lyrics = (project_dir / "lyrics.txt").read_text(encoding="utf-8").strip()
 
         prompts = claude_api.generate_storyboard_prompts(project, shots, style_guide, lyrics)
         pipeline_api.save_storyboard_prompts(project, prompts)
