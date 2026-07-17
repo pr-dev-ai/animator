@@ -34,6 +34,7 @@ from typing import Generator
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
+PROJECTS_DIR = REPO_ROOT / "projects"
 
 # scripts/ holds the spec author, the renderer, and the beat/tool resolvers.
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -149,37 +150,188 @@ def _concat_and_mux(ffmpeg, section_mp4s, song, out_path, work_dir) -> None:
         concat.unlink(missing_ok=True)
 
 
-def _build_from_own_images(project, song, n_images) -> Generator[str, None, None]:
-    """General animation path: animate the PROJECT'S OWN storyboard images.
+def _list_own_images(project):
+    """The project's own storyboard PNGs, in filename order (SH010, SH020, ...)."""
+    return sorted((OUTPUTS_DIR / f"{project}_storyboards").glob("*.png"))
 
-    Interim implementation delegates to scripts/make_dailies.py, which renders a
-    lyric-synced, beat-cut motion video from the project's own images + song and
-    writes outputs/<project>_animatic.mp4.  We copy that to <project>_animated.mp4
-    so the studio's Animate stage serves the project's real content instead of the
-    hardcoded bus.  The depth-based 2.5D parallax upgrade replaces this body.
+
+def _plan_own_shots(project, song_duration):
+    """Order the project's images into shots that span the whole song.
+
+    Returns [(shot_id, image_path, slot_seconds)] whose slots sum to exactly
+    `song_duration` (quantised to the frame grid), so the finished video matches
+    the audio length.
+
+    Timing priority (mirrors make_dailies):
+      1. Lyric-synced windows, when enough shots quote a lyric (authoritative).
+      2. Otherwise stretch the shotlist durations to fill the song and snap the
+         cuts onto musical bar boundaries; with no shotlist, split evenly.
     """
-    import blender_render  # only for its ffmpeg/tool resolvers
+    import beat_timing
+    from make_dailies import read_shotlist, snap_durations_to_bars
+
+    images = _list_own_images(project)
+    img_by_id = {p.stem: p for p in images}
+
+    # Base order + weights: the shotlist, restricted to shots that have an image.
+    shotlist = PROJECTS_DIR / project / "shotlist.csv"
+    ordered = []
+    if shotlist.is_file():
+        ordered = [(s["shot_id"], s["duration"])
+                   for s in read_shotlist(shotlist) if s["shot_id"] in img_by_id]
+    if not ordered:                               # no shotlist / no id match
+        ordered = [(p.stem, 1.0) for p in images]
+    ids = [i for i, _ in ordered]
+    base = [max(0.1, d) for _, d in ordered]
+
+    # 1) Lyric sync, only if it placed (nearly) every shot.
+    windows = {k: v for k, v in beat_timing.shot_windows(project).items()
+               if k in img_by_id}
+    if windows and len(windows) >= max(2, int(0.8 * len(ids))):
+        ids = sorted(windows, key=lambda k: windows[k][0])
+        slots = [windows[k][1] for k in ids]
+    else:
+        # 2) Stretch to fill the song, then snap cuts onto bar boundaries.
+        total_base = sum(base)
+        slots = [b * song_duration / total_base for b in base]
+        bar_times, _tempo, bar_seconds = beat_timing.bar_grid(project, song_duration)
+        if bar_times and bar_seconds:
+            slots, _moved = snap_durations_to_bars(slots, bar_times, bar_seconds)
+
+    # Quantise to the frame grid and pin the total to the song length exactly, so
+    # sum(slots) == song_duration and audio/video end together.
+    slots = [max(1, round(s * FPS)) / FPS for s in slots]
+    target_frames = round(song_duration * FPS)
+    drift = target_frames - round(sum(slots) * FPS)
+    slots[-1] = max(1, round(slots[-1] * FPS) + drift) / FPS   # absorb rounding
+
+    return [(sid, img_by_id[sid], slot) for sid, slot in zip(ids, slots)]
+
+
+def _build_from_own_images(project, song, n_images) -> Generator[str, None, None]:
+    """General animation path: DEPTH-PARALLAX-animate the project's own images.
+
+    For each storyboard still we estimate a monocular depth map, slice it into
+    near/mid/far paper-cutout layers (scripts/depth_parallax.py), and render a
+    Blender spec in which each layer pans by a different amount -> genuine 2.5D
+    parallax rather than a flat Ken Burns pan/zoom.  Shots are cut together with a
+    short crossfade and the project's song is muxed on, writing
+    outputs/<project>_animated.mp4.
+
+    Rendered section-by-section with a per-shot cache (same design as the bus
+    showcase path), so a re-invocation resumes instead of restarting, and no
+    single render step runs long.  Yields progress lines; the final line is
+    "DONE" or starts with "ERROR:".
+    """
+    import blender_render
+    import depth_parallax
+    import make_dailies as md
+
     yield (f"Animating '{project}' from its own {n_images} storyboard images "
-           f"(lyric-synced motion).")
-    cmd = [sys.executable, str(SCRIPTS_DIR / "make_dailies.py"), "--project", project]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True, bufsize=1)
-    for line in proc.stdout:
-        line = line.rstrip()
-        if line:
-            yield f"  {line}"
-    proc.wait()
-    if proc.returncode != 0:
-        yield f"ERROR: animation build failed (make_dailies exited {proc.returncode})"
+           f"via depth-based 2.5D parallax.")
+
+    blender = blender_render.resolve_blender()
+    if not blender:
+        yield "ERROR: Blender not found (install BlenderFoundation.Blender)"
         return
-    animatic = OUTPUTS_DIR / f"{project}_animatic.mp4"
-    if not animatic.is_file():
-        yield f"ERROR: expected {animatic} was not produced"
+    ffmpeg = blender_render.resolve_ffmpeg()
+    try:
+        subprocess.run([ffmpeg, "-version"], capture_output=True, check=True)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        yield "ERROR: ffmpeg not found (install Gyan.FFmpeg)"
         return
+
+    song_duration = md.probe_duration(song)
+    if song_duration <= 0:
+        yield f"ERROR: could not read song duration from {song}"
+        return
+
+    try:
+        plan = _plan_own_shots(project, song_duration)
+    except Exception as exc:                       # noqa: BLE001
+        yield f"ERROR: could not plan shots: {exc}"
+        return
+    if not plan:
+        yield "ERROR: no storyboard images to animate"
+        return
+    yield (f"Planned {len(plan)} shots over {song_duration:.0f}s "
+           f"(depth parallax, CPU render).")
+
+    build_dir = OUTPUTS_DIR / "_parallax_build" / project
+    assets_dir = build_dir / "assets"
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    slots = [s for _, _, s in plan]
+    # Crossfade must stay shorter than the shortest shot (else xfade offsets
+    # overlap and ffmpeg produces garbage); cap at 0.4x the shortest slot.
+    xfade = min(0.5, 0.4 * min(slots)) if len(plan) > 1 else 0.0
+    xfade = round(xfade * FPS) / FPS
+
+    clips = []
+    for idx, (sid, img, slot) in enumerate(plan, 1):
+        # Render each clip xfade longer than its slot so the crossfade overlap is
+        # consumed without stealing screen time (see make_dailies.assemble math).
+        render_dur = slot + xfade
+        nframes = round(render_dur * FPS)
+        drift = idx - 1                            # cycle camera drift per shot
+        mp4_path = build_dir / f"{sid}.mp4"
+        hash_path = build_dir / f"{sid}.hash"
+        want_hash = _sha(f"{img.name}|{img.stat().st_mtime_ns}|{render_dur:.4f}|"
+                         f"{drift}|{FPS}|v1")
+
+        if (mp4_path.is_file() and hash_path.is_file()
+                and hash_path.read_text().strip() == want_hash):
+            yield f"[{idx}/{len(plan)}] {sid} ({slot:.1f}s) — cached, skipping"
+            clips.append(mp4_path)
+            continue
+
+        yield (f"[{idx}/{len(plan)}] {sid} ({slot:.1f}s) — depth + parallax, "
+               f"{nframes} frames")
+        try:
+            spec_path = depth_parallax.build_shot(
+                img, assets_dir, render_dur, drift_index=drift, fps=FPS)
+        except Exception as exc:                   # noqa: BLE001
+            yield f"ERROR: depth/layer build failed for {sid}: {exc}"
+            return
+
+        frames_dir = build_dir / f"frames_{sid}"
+        rc = yield from _render_frames(blender, spec_path, frames_dir)
+        if rc != 0:
+            shutil.rmtree(frames_dir, ignore_errors=True)
+            yield (f"ERROR: Blender exited {rc} on shot '{sid}' — render failed or "
+                   f"the silent-failure guard tripped. No video written.")
+            return
+        try:
+            _encode_section(ffmpeg, frames_dir, nframes, mp4_path)
+        except RuntimeError as exc:
+            yield f"ERROR: {exc}"
+            return
+        finally:
+            shutil.rmtree(frames_dir, ignore_errors=True)
+        hash_path.write_text(want_hash, encoding="utf-8")
+        clips.append(mp4_path)
+        yield f"    shot '{sid}' encoded ({nframes} frames = {render_dur:.1f}s)"
+
     out_path = OUTPUTS_DIR / f"{project}_animated.mp4"
-    shutil.copy2(animatic, out_path)
+    total = sum(slots)
+    yield (f"Crossfading {len(clips)} shots ({xfade:.2f}s transitions) and "
+           f"muxing the song ({total:.0f}s)...")
+    audio_track = build_dir / "_audio.wav"
+    try:
+        md.build_audio_track(total, song, [], audio_track)
+        md.assemble(clips, slots, xfade, audio_track, out_path)
+    except SystemExit:
+        yield "ERROR: crossfade assembly / mux failed (see log above)"
+        return
+    finally:
+        audio_track.unlink(missing_ok=True)
+
+    if not out_path.is_file():
+        yield "ERROR: assembly produced no output file"
+        return
     size_mb = out_path.stat().st_size / (1024 * 1024)
-    yield f"Wrote {out_path} ({size_mb:.1f} MB) from this project's own scenes"
+    yield (f"Wrote {out_path} ({size_mb:.1f} MB, {total:.0f}s, {FPS}fps, "
+           f"depth-parallax video+audio)")
     yield "DONE"
 
 
