@@ -327,7 +327,13 @@ async function generateChords() {
 
   setLoading(btn, true, 'Generating chords...');
   try {
-    const data = await api('POST', '/api/generate/chords', { lyrics: state.lyrics, project: state.project || '' });
+    // Pass the chosen style through so it steers the tempo that ends up in
+    // chords.json — and therefore the tempo the instrumental is synthesised at.
+    const data = await api('POST', '/api/generate/chords', {
+      lyrics: state.lyrics,
+      project: state.project || '',
+      style: document.getElementById('lyrics-style')?.value || '',
+    });
 
     // HTML: <div id="chords-display" class="hidden"> + <pre id="chords-pre">
     const chordsDisplay = document.getElementById('chords-display');
@@ -336,9 +342,9 @@ async function generateChords() {
     const pre = document.getElementById('chords-pre');
     if (pre) {
       const parts = [];
-      if (data.data.key) parts.push(`Key: ${data.data.key}`);
+      if (data.data.style) parts.push(`Style: ${data.data.style}`);
       if (data.data.tempo_bpm) parts.push(`Tempo: ${data.data.tempo_bpm} BPM`);
-      if (data.data.strumming_pattern) parts.push(`Strumming: ${data.data.strumming_pattern}`);
+      if (data.data.chords?.length) parts.push(`Chords: ${data.data.chords.join(', ')}`);
       if (data.data.chord_chart) parts.push('', data.data.chord_chart);
       pre.textContent = parts.join('\n');
     }
@@ -797,19 +803,20 @@ async function buildAnimatic() {
 
 async function checkHealth() {
   try {
-    const data = await api('GET', '/api/health');
+    // /api/health uses the standard {ok, data} envelope like every other route.
+    const health = (await api('GET', '/api/health')).data || {};
 
     // HTML: <span class="status-dot" id="dot-comfyui"> (not "comfyui-status")
     const dotComfy = document.getElementById('dot-comfyui');
     if (dotComfy) {
-      dotComfy.className = `status-dot ${data.comfyui ? 'online' : 'offline'}`;
+      dotComfy.className = `status-dot ${health.comfyui ? 'online' : 'offline'}`;
     }
 
     // Merge project list from health into dropdown
-    if (Array.isArray(data.projects) && data.projects.length > 0) {
+    if (Array.isArray(health.projects) && health.projects.length > 0) {
       const selectEl = document.getElementById('project-select');
       if (selectEl) {
-        data.projects.forEach(name => {
+        health.projects.forEach(name => {
           if (!Array.from(selectEl.options).some(o => o.value === name)) {
             const opt = document.createElement('option');
             opt.value = name;

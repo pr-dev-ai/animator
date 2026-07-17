@@ -82,16 +82,16 @@ def index() -> str:
 
 
 @app.route("/api/health")
-def health() -> Response:
+def health() -> Response | tuple[Response, int]:
     try:
         from web_ui import pipeline_api  # lazy import
 
         projects = pipeline_api.list_projects()
         comfyui_ok = pipeline_api.check_comfyui_health()
-        return jsonify({"ok": True, "comfyui": comfyui_ok, "projects": projects})
+        return _ok({"comfyui": comfyui_ok, "projects": projects})
     except Exception as exc:
         logger.exception("Health check failed")
-        return jsonify({"ok": False, "comfyui": False, "projects": [], "error": str(exc)}), 503
+        return _err(str(exc), 503)
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +199,7 @@ def generate_lyrics() -> Response | tuple[Response, int]:
 def generate_chords() -> Response | tuple[Response, int]:
     try:
         from web_ui import claude_api  # lazy import
+        from web_ui import pipeline_api  # lazy import
 
         body = request.get_json(force=True) or {}
         lyrics: str = body.get("lyrics", "").strip()
@@ -210,13 +211,28 @@ def generate_chords() -> Response | tuple[Response, int]:
             return _err("Lyrics are too short — add more content before generating chords", 400)
 
         project_for_chords: str = body.get("project", "").strip()
-        result = claude_api.generate_chords(lyrics)
+        style: str = body.get("style", "").strip()
+
+        # Optional explicit tempo — when supplied it overrides Claude's suggestion.
+        raw_tempo = body.get("tempo_bpm")
+        tempo_bpm: int | None = None
+        if raw_tempo not in (None, ""):
+            try:
+                tempo_bpm = int(raw_tempo)
+            except (TypeError, ValueError):
+                return _err(f"'tempo_bpm' must be a number, got {raw_tempo!r}", 400)
+
+        # Validate the project before the (paid) Claude call, so a bad name
+        # fails fast instead of burning a request and then discarding the result.
+        if project_for_chords:
+            pdir = pipeline_api.project_dir(project_for_chords)
+            if not pdir.is_dir():
+                return _err(f"Project '{project_for_chords}' not found", 404)
+
+        result = claude_api.generate_chords(lyrics, style, tempo_bpm)
         # Persist to disk so instrumental generation can read it later
         if project_for_chords:
-            chords_file = REPO_ROOT / "projects" / project_for_chords / "chords.json"
-            if chords_file.parent.is_dir():
-                import json as _json
-                chords_file.write_text(_json.dumps(result), encoding="utf-8")
+            pipeline_api.save_chords(project_for_chords, result)
         return _ok(result)
     except ValueError as exc:
         return _err(str(exc), 400)
@@ -250,10 +266,7 @@ def generate_prompts() -> Response | tuple[Response, int]:
                 400,
             )
 
-        style_guide_path = project_dir / "styleguide.md"
-        style_guide: str = ""
-        if style_guide_path.exists():
-            style_guide = style_guide_path.read_text(encoding="utf-8")
+        style_guide: str = pipeline_api.read_styleguide(project)
 
         if style and style_guide:
             style_guide = f"Style: {style}\n\n{style_guide}"
@@ -507,8 +520,10 @@ def animatic_build() -> Response | tuple[Response, int]:
 @app.route("/api/animatic/<string:project>")
 def serve_animatic(project: str) -> Response | tuple[Response, int]:
     try:
-        mp4_path = REPO_ROOT / "outputs" / f"{project}_animatic.mp4"
-        if not mp4_path.exists():
+        from web_ui import pipeline_api  # lazy import
+
+        mp4_path = pipeline_api.get_animatic_path(project)
+        if mp4_path is None:
             return _err(f"Animatic not found for project '{project}'", 404)
         return send_file(mp4_path, mimetype="video/mp4")
     except Exception as exc:
@@ -519,15 +534,9 @@ def serve_animatic(project: str) -> Response | tuple[Response, int]:
 @app.route("/api/storyboards/<string:project>")
 def list_storyboards(project: str) -> Response | tuple[Response, int]:
     try:
-        storyboard_dir = REPO_ROOT / "outputs" / f"{project}_storyboards"
-        if not storyboard_dir.exists():
-            return _ok([])
-        files = sorted(
-            f.name
-            for f in storyboard_dir.iterdir()
-            if f.suffix.lower() in {".png", ".jpg", ".jpeg"}
-        )
-        return _ok(files)
+        from web_ui import pipeline_api  # lazy import
+
+        return _ok(pipeline_api.get_storyboard_images(project))
     except Exception as exc:
         logger.exception("list_storyboards failed for %s", project)
         return _err(str(exc))
