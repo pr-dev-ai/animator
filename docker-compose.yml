@@ -22,7 +22,9 @@ services:
       - ./comfyui:/app/workspace
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - COMFYUI_ARGS=--medvram --fp16-vae
+      # --medvram is an Automatic1111 flag; ComfyUI rejects it and exits.
+      # ComfyUI manages VRAM dynamically by default, which suits the 6GB card.
+      - COMFYUI_ARGS=--fp16-vae
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8188 || wget --quiet --tries=1 --spider http://localhost:8188 || exit 1"]

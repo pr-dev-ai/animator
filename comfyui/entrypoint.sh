@@ -23,7 +23,9 @@ if [ ! -f ComfyUI/main.py ] || [ ! -d ComfyUI/comfy/ldm/models ]; then
   else
     echo "ComfyUI directory exists with mounted volumes, cloning to temp location..."
     git clone https://github.com/comfyanonymous/ComfyUI.git /tmp/ComfyUI_new
-    rsync -a --exclude=models --exclude=output /tmp/ComfyUI_new/ ComfyUI/ || \
+    # Anchor excludes to the transfer root: unanchored patterns match at any
+    # depth and would also drop ComfyUI's own comfy/ldm/models source dir.
+    rsync -a --exclude=/models --exclude=/output /tmp/ComfyUI_new/ ComfyUI/ || \
       (cd /tmp/ComfyUI_new && find . -mindepth 1 \
         ! -path "./models*" ! -path "./output*" \
         -exec cp -r {} /app/workspace/ComfyUI/ \;)

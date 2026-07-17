@@ -1,0 +1,9 @@
+# Shell scripts and Dockerfiles run inside Linux containers. Git for Windows
+# defaults to core.autocrlf=true, which would rewrite their line endings on
+# checkout and turn `#!/bin/bash` into `#!/bin/bash\r` — the kernel then fails
+# to find the interpreter and reports the misleading
+# "exec /entrypoint.sh: no such file or directory".
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+docker-compose.yml text eol=lf
