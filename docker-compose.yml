@@ -22,7 +22,7 @@ services:
       - ./comfyui:/app/workspace
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
-      - COMFYUI_ARGS=--lowvram --fp16-vae
+      - COMFYUI_ARGS=--medvram --fp16-vae
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8188 || wget --quiet --tries=1 --spider http://localhost:8188 || exit 1"]

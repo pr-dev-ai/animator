@@ -80,6 +80,11 @@ source .venv/bin/activate
 echo "Checking web UI dependencies..."
 pip install -q -r web_ui/requirements.txt
 
+# Limit GPU power to prevent system shutdown under peak inference load
+if command -v nvidia-smi &>/dev/null; then
+    nvidia-smi -pl 90 2>/dev/null && echo "GPU power limit set to 90W." || true
+fi
+
 echo ""
 echo "Starting Kids Animation Studio..."
 echo "Open your browser at: http://localhost:5000"
