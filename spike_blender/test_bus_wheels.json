@@ -1,0 +1,57 @@
+{
+  "fps": 24,
+  "duration": 4.0,
+  "resolution": [1152, 768],
+  "layers": [
+    {
+      "name": "bg",
+      "image": "test_assets/bg.png",
+      "z": 0,
+      "anchor": [576, 384],
+      "keyframes": [
+        {"t": 0.0, "pos": [576, 384]}
+      ]
+    },
+    {
+      "name": "road",
+      "image": "test_assets/road.png",
+      "z": 1,
+      "anchor": [576, 80],
+      "keyframes": [
+        {"t": 0.0, "pos": [576, 688]}
+      ]
+    },
+    {
+      "name": "bus",
+      "image": "test_assets/bus.png",
+      "z": 2,
+      "anchor": [260, 120],
+      "keyframes": [
+        {"t": 0.0, "pos": [300, 470], "rot": 0, "scale": 1.0, "easing": "ease_in_out"},
+        {"t": 4.0, "pos": [860, 470], "rot": 0, "scale": 1.0}
+      ]
+    },
+    {
+      "name": "wheel_front",
+      "image": "test_assets/wheel.png",
+      "z": 3,
+      "anchor": [80, 80],
+      "parent": "bus",
+      "keyframes": [
+        {"t": 0.0, "pos": [140, 130], "rot": 0,    "scale": 1.0},
+        {"t": 4.0, "pos": [140, 130], "rot": 1080, "scale": 1.0}
+      ]
+    },
+    {
+      "name": "wheel_rear",
+      "image": "test_assets/wheel.png",
+      "z": 3,
+      "anchor": [80, 80],
+      "parent": "bus",
+      "keyframes": [
+        {"t": 0.0, "pos": [-140, 130], "rot": 0,    "scale": 1.0},
+        {"t": 4.0, "pos": [-140, 130], "rot": 1080, "scale": 1.0}
+      ]
+    }
+  ]
+}
