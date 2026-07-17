@@ -80,6 +80,60 @@ VALID_KEYSCALES = frozenset(
 )
 DEFAULT_KEYSCALE = "C major"
 
+# TextEncodeAceStepAudio1.5's `language` COMBO offers 51 codes, but that list is a
+# wishlist, not an evaluated capability: comfy/text_encoders/ace15.py simply
+# interpolates the code as a raw string into a Qwen prompt
+# ("# Languages\n{}\n\n# Lyric\n{}") — there is no G2P, no phoneme mapping and no
+# language token.  It is a soft hint.  ACE-Step 1.5's paper only evaluates
+# Chinese/English.  We therefore expose only what has been measured on this
+# pipeline; adding a code here without an ASR check would just mislead the user.
+SUPPORTED_LANGUAGES = {"en": "English", "hi": "Hindi"}
+DEFAULT_LANGUAGE = "en"
+
+# Script choice for Hindi: BOTH work, and no code here needs to force one.
+# Measured on this box (120s song, seed 31, identical lyrics in both scripts,
+# Whisper 'small' fuzzy phonetic word-recall, noise floor ~10%):
+#     Devanagari + language="hi"  64.1%   (noise  9.4%)
+#     romanized  + language="hi"  57.0%   (noise 10.6%)
+#     romanized  + language="en"  56.3%   (noise 12.5%)  <- language hint barely matters
+#     English baseline            88.1%   (noise 10.6%)
+# Devanagari edged out romanized, so there is no reason to romanize for the
+# model's benefit — contrary to the initial hypothesis that the paper's §2.3
+# stochastic Romanization would make romanized input win.  The 7-point gap is
+# one seed per variant and within seed noise, so neither script is declared a
+# winner here.  claude_api._ROMAN_SCRIPT_LANGUAGES already makes generate_lyrics
+# emit romanized Hindi and that path measures fine; it is left alone because it
+# governs what the user reads in the Lyrics tab, not just what the model sings.
+
+
+# Every spelling we accept -> the code the node wants.  Built from
+# SUPPORTED_LANGUAGES so the two can never drift apart.
+_LANGUAGE_ALIASES = {code.lower(): code for code in SUPPORTED_LANGUAGES}
+_LANGUAGE_ALIASES.update({name.lower(): code for code, name in SUPPORTED_LANGUAGES.items()})
+
+
+def is_supported_language(value: Optional[str]) -> bool:
+    """True if *value* names a language this pipeline has actually been measured on."""
+    return bool(value) and value.strip().lower() in _LANGUAGE_ALIASES
+
+
+def normalize_language(value: Optional[str]) -> str:
+    """Returns a language code the ACE-Step node will accept.
+
+    Accepts either a code ("hi") or an English name ("Hindi"), case-insensitively.
+    Anything unsupported degrades to DEFAULT_LANGUAGE rather than failing the song:
+    an unrecognised value is not in the node's COMBO and would be rejected by
+    /prompt with HTTP 400, killing the whole song (the same trap chord_to_keyscale
+    guards for keyscale).  Callers that want to tell the user about a downgrade
+    should ask is_supported_language() first.
+    """
+    if not is_supported_language(value):
+        if value:
+            logger.debug("unsupported language %r — falling back to %s", value, DEFAULT_LANGUAGE)
+        return DEFAULT_LANGUAGE
+    return _LANGUAGE_ALIASES[value.strip().lower()]
+
+
 # Chord -> (root, quality).  Claude writes chords like "Am7", "Cmaj7", "G7", "Dsus4";
 # only the root and the major/minor quality are meaningful for a key signature.
 _CHORD_RE = re.compile(r"^([A-G][#b]?)(.*)$")
@@ -228,6 +282,26 @@ def chord_to_keyscale(chord: str) -> str:
     return keyscale if keyscale in VALID_KEYSCALES else DEFAULT_KEYSCALE
 
 
+def _read_language(project: str) -> Optional[str]:
+    """Returns the language code in projects/<project>/language.txt, or None.
+
+    Lets a project pin the language its lyrics were written in so the song is sung
+    in that language without the caller having to pass it every time.  Nothing in
+    the app writes this file yet — /api/generate/lyrics takes a `language` but does
+    not persist it (it does not persist lyrics.txt either; the storyboard route
+    does that).  Until a caller writes it, generate_song's `language=` argument is
+    the way in, and an absent file just means DEFAULT_LANGUAGE.
+    """
+    lang_file = REPO_ROOT / "projects" / project / "language.txt"
+    if not lang_file.exists():
+        return None
+    try:
+        return lang_file.read_text(encoding="utf-8").strip() or None
+    except Exception as exc:
+        logger.debug("language.txt unreadable: %s", exc)
+        return None
+
+
 def _read_style(project: str) -> tuple[str, int, str]:
     """Returns (tags, bpm, keyscale) from chords.json / arrangement.json, with defaults."""
     project_dir = REPO_ROOT / "projects" / project
@@ -279,7 +353,12 @@ def build_workflow(
     Mirrors ComfyUI's official audio_ace_step_1_5_split template: the DiT is wrapped in
     ModelSamplingAuraFlow, the negative branch is a ConditioningZeroOut of the positive,
     and the latent length must agree with the encoder's duration.
+
+    `language` is normalised here as well as in generate_song: it is a strict COMBO on
+    the node, so an unlisted value (e.g. "kn") is rejected by /prompt with HTTP 400 and
+    loses the whole song.  Idempotent, and keeps direct callers of build_workflow safe.
     """
+    language = normalize_language(language)
     return {
         "104": {"class_type": "UNETLoader", "inputs": {
             "unet_name": DIT_MODEL, "weight_dtype": weight_dtype}},
@@ -379,11 +458,17 @@ def generate_song(
     seed: int = 31,
     restart_worker_first: bool = True,
     weight_dtype: str = DEFAULT_WEIGHT_DTYPE,
+    language: Optional[str] = None,
 ) -> Generator[str, None, None]:
     """Generates a full song with sung vocals for a project via ACE-Step 1.5.
 
     Reads projects/<project>/lyrics.txt plus chords/arrangement for tempo and key,
     and writes outputs/<project>_song.wav.
+
+    Args:
+        language: Language hint for the vocals — a SUPPORTED_LANGUAGES code
+            ("en", "hi").  Defaults to the project's saved language (written by
+            the Lyrics tab), else "en".
 
     Yields plain log lines (server.py wraps these in SSE); the final line is "DONE"
     or starts with "ERROR:".
@@ -404,9 +489,20 @@ def generate_song(
 
     lyrics = _format_lyrics(raw_lyrics)
     tags, bpm, keyscale = _read_style(project)
+    requested = language if language is not None else _read_language(project)
+    lang = normalize_language(requested)
 
     yield f"Model: ACE-Step 1.5 turbo ({weight_dtype}) — real instruments + sung vocals"
     yield f"Tempo {bpm} BPM | Key {keyscale} | Target {duration:.0f}s"
+    yield f"Language: {SUPPORTED_LANGUAGES[lang]} ({lang})"
+    # claude_api.generate_lyrics writes lyrics in languages this model has not been
+    # measured on (Japanese, Korean, Arabic, Thai, Mandarin).  Those degrade to
+    # English here, which is a silent behaviour change the user would otherwise only
+    # find by ear — so say it out loud rather than only at logger.debug.
+    if requested and not is_supported_language(requested):
+        yield (f"  WARNING: {requested!r} is not a supported singing language — "
+               f"using {SUPPORTED_LANGUAGES[lang]}. Supported: "
+               f"{', '.join(sorted(SUPPORTED_LANGUAGES.values()))}")
     sections = sum(1 for ln in lyrics.splitlines() if ln.startswith("["))
     yield f"Lyrics: {len(lyrics.splitlines())} lines across {sections} sections"
 
@@ -420,6 +516,7 @@ def generate_song(
     workflow = build_workflow(
         tags=tags, lyrics=lyrics, duration=duration,
         bpm=bpm, keyscale=keyscale, seed=seed, weight_dtype=weight_dtype,
+        language=lang,
     )
 
     try:
