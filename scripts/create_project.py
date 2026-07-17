@@ -418,7 +418,11 @@ Quickstart:
 
 def print_quickstart(name: str, project_dir: Path) -> None:
     rel = project_dir.relative_to(REPO_ROOT)
-    print(f"\n✅ Created project: {rel}/\n")
+    # Plain ASCII only: this goes to stdout, which is cp1252 on Windows and
+    # raises UnicodeEncodeError on characters outside that codepage.  A crash
+    # here exits non-zero and makes callers (pipeline_api.create_project, which
+    # checks the return code) report failure for a project that was created fine.
+    print(f"\nCreated project: {rel}/\n")
     print(QUICKSTART_TEMPLATE.format(rel=rel, name=name))
 
 

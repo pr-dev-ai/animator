@@ -26,6 +26,45 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 logger = logging.getLogger(__name__)
 
 
+_VALID_PROJECT_NAME = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def project_dir(project: str) -> Path:
+    """Return projects/<project>, rejecting names that could escape projects/.
+
+    Project names are created under this same charset (see create_project), so
+    any legitimate project matches.  Rejecting here keeps a caller-supplied
+    name like "../outputs" from steering a write outside projects/.
+    """
+    if not _VALID_PROJECT_NAME.fullmatch(project):
+        raise ValueError(
+            f"Invalid project name {project!r} — only letters, numbers, "
+            "underscores, and hyphens are allowed."
+        )
+    return REPO_ROOT / "projects" / project
+
+
+def _write_json_atomic(path: Path, obj: object) -> None:
+    """Write *obj* as JSON to *path* via tmp+replace so readers never see a partial file."""
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def save_chords(project: str, chords: dict) -> None:
+    """Persist chords.json for *project* so generate_instrumental can read it.
+
+    Raises ValueError if the project name is invalid or the project is missing —
+    silently skipping the write would strand the user's tempo/style choice and
+    send the synth back to the default tempo.
+    """
+    pdir = project_dir(project)
+    if not pdir.is_dir():
+        raise ValueError(f"Project '{project}' not found")
+    _write_json_atomic(pdir / "chords.json", chords)
+    logger.info("Saved chords: %s", pdir / "chords.json")
+
+
 def list_projects() -> list[str]:
     """Returns sorted list of project directory names in projects/."""
     projects_dir = REPO_ROOT / "projects"
@@ -58,20 +97,14 @@ def check_comfyui_health() -> bool:
 def create_project(name: str, type_: str) -> dict:
     """Creates a new project by calling scripts/create_project.py via subprocess.
 
-    Returns {"name": name, "path": str(project_dir)}.
+    Returns {"name": name, "path": str(<project dir>)}.
     Raises ValueError if the project already exists or the name is invalid.
     """
-    # Perform a local fast-fail check before invoking the subprocess so the
-    # caller receives a clear ValueError rather than parsing stderr.
-    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
-        raise ValueError(
-            f"Invalid project name {name!r} — only letters, numbers, "
-            "underscores, and hyphens are allowed."
-        )
-
-    project_dir = REPO_ROOT / "projects" / name
-    if project_dir.exists():
-        raise ValueError(f"Project already exists: {project_dir}")
+    # Validate up front (project_dir raises on a bad name) so the caller gets a
+    # clear ValueError rather than having to parse the subprocess's stderr.
+    pdir = project_dir(name)
+    if pdir.exists():
+        raise ValueError(f"Project already exists: {pdir}")
 
     cmd = [
         sys.executable,
@@ -97,7 +130,7 @@ def create_project(name: str, type_: str) -> dict:
         logger.error("create_project.py failed: %s", msg)
         raise ValueError(msg)
 
-    return {"name": name, "path": str(project_dir)}
+    return {"name": name, "path": str(pdir)}
 
 
 def get_project_shots(project: str) -> list[dict]:
@@ -297,10 +330,7 @@ def save_storyboard_prompts(project: str, prompts: list[dict]) -> None:
     tmp_md.replace(storyboards_md)
 
     # JSON sidecar — used by generate_storyboard_images for machine-readable access.
-    storyboards_json = prompts_dir / "storyboards.json"
-    tmp_json = storyboards_json.with_suffix(".json.tmp")
-    tmp_json.write_text(json.dumps(prompts, indent=2), encoding="utf-8")
-    tmp_json.replace(storyboards_json)
+    _write_json_atomic(prompts_dir / "storyboards.json", prompts)
     logger.info("Saved storyboard prompts: %s", storyboards_md)
 
 
@@ -541,28 +571,42 @@ def generate_instrumental(project: str) -> Generator[str, None, None]:
     from web_ui import claude_api
     from web_ui.music_gen import arrangement_to_wav
 
-    project_dir = REPO_ROOT / "projects" / project
-    if not project_dir.is_dir():
+    try:
+        proj_dir = project_dir(project)
+    except ValueError as exc:
+        yield f"ERROR: {exc}"
+        return
+    if not proj_dir.is_dir():
         yield f"ERROR: Project '{project}' not found"
         return
 
-    # Load chords saved by the Lyrics tab
-    chords_file = project_dir / "chords.json"
+    # Load chords saved by the Lyrics tab.  generate_chords always writes
+    # tempo_bpm and style alongside the chords, so the user's choices reach
+    # the synth below rather than silently defaulting.
+    chords_file = proj_dir / "chords.json"
     chords: list[str] = ["C", "G", "Am", "F"]
-    tempo_bpm: int = 120
-    style: str = "kids pop"
+    tempo_bpm: int = claude_api.DEFAULT_TEMPO_BPM
+    style: str = claude_api.DEFAULT_STYLE
     if chords_file.exists():
         try:
             cd = json.loads(chords_file.read_text(encoding="utf-8"))
-            chords = cd.get("chords") or chords
-            tempo_bpm = int(cd.get("tempo_bpm") or tempo_bpm)
-            style = cd.get("style") or style
-        except Exception:
-            pass
+            if not isinstance(cd, dict):
+                raise ValueError("chords.json is not a JSON object")
+        except Exception as exc:
+            logger.warning("Could not read chords.json for %s: %s", project, exc)
+            yield f"Could not read chords.json ({exc}) — using default chords and tempo"
+        else:
+            raw_chords = cd.get("chords")
+            if isinstance(raw_chords, list) and raw_chords:
+                chords = [str(c) for c in raw_chords]
+            tempo_bpm = claude_api.coerce_tempo(cd.get("tempo_bpm"), fallback=tempo_bpm)
+            style = claude_api.coerce_style(cd.get("style"), fallback=style)
+    else:
+        yield "No chords.json found — using default chords and tempo"
 
     # Load lyrics
     lyrics = ""
-    lyrics_file = project_dir / "lyrics.txt"
+    lyrics_file = proj_dir / "lyrics.txt"
     if lyrics_file.exists():
         lyrics = lyrics_file.read_text(encoding="utf-8").strip()
 
@@ -576,15 +620,19 @@ def generate_instrumental(project: str) -> Generator[str, None, None]:
         return
 
     bars = arrangement.get("bars", [])
-    resolved_tempo = arrangement.get("tempo_bpm", tempo_bpm)
+    # tempo_bpm (from chords.json) is the authoritative tempo — it is what the
+    # user's style/tempo choice resolved to.  The arrangement only supplies
+    # bars; ignore any tempo the model echoes back so the synth cannot drift
+    # off the chosen tempo.
+    resolved_tempo = tempo_bpm
+    arrangement["tempo_bpm"] = resolved_tempo
     yield f"Arrangement ready: {len(bars)} bars at {resolved_tempo} BPM"
 
-    # Save arrangement JSON
-    arr_path = project_dir / "arrangement.json"
+    # Save arrangement JSON atomically so a crash mid-write cannot truncate it.
     try:
-        arr_path.write_text(json.dumps(arrangement, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+        _write_json_atomic(proj_dir / "arrangement.json", arrangement)
+    except Exception as exc:
+        logger.warning("Could not save arrangement.json for %s: %s", project, exc)
 
     yield "Synthesizing audio..."
     try:

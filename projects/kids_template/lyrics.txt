@@ -1,32 +1,33 @@
-Nach nach khush ho jao, nach nach khush ho jao
-Aapka sharir hai ekdum fit, nach nach khush ho jao
+[Replace this file with your own song lyrics.]
+
+The structure below matches the placeholder shots in shotlist.csv
+(SH020/SH030/SH050/SH060 = verses 1-4) and the song rows in dialogue.csv.
+Add or remove verses to suit your song, then update those files to match.
+
+Chorus:
+[Your chorus line here]
+[Your chorus line here, repeated or varied]
 
 Verse 1:
-Uthho betaa, baithe rehna nahin
-Naachne ka samay hai aaj
-Haath hilao, pair jhulao
-Koyi sharm nahin, yeh hai raaj
+[Line 1 of verse 1 — sung by the bunny in SH020]
+[Line 2 of verse 1]
+[Line 3 of verse 1]
+[Line 4 of verse 1]
 
 Verse 2:
-Agla peeche aage-peeche
-Daayin-baayin move karo
-Upar-neechay jump karo
-Sab taraf spin karo
+[Line 1 of verse 2 — sung by the duck in SH030]
+[Line 2 of verse 2]
+[Line 3 of verse 2]
+[Line 4 of verse 2]
 
 Verse 3:
-Chhoti chhoti steps deke
-Bade hero ban jaao
-Muskurate hue naachte chalo
-Dunia ko dikha do
+[Line 1 of verse 3 — sung by the cat in SH050]
+[Line 2 of verse 3]
+[Line 3 of verse 3]
+[Line 4 of verse 3]
 
 Verse 4:
-Dost saath milke naachenge
-Sab milke circle banenge
-Haath pakad ke chacha chacha
-Sab mila ke masti karenge
-
-Verse 5:
-Naachne se body strong hogi
-Dimag bhi taja ho jayega
-Haasna aur hasana mil jayega
-Jindagi khushiyon se bhun jayegi
+[Line 1 of verse 4 — sung by the dog in SH060]
+[Line 2 of verse 4]
+[Line 3 of verse 4]
+[Line 4 of verse 4]

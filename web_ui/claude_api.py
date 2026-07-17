@@ -118,14 +118,58 @@ def generate_lyrics(theme: str, style: str, num_verses: int, language: str = "En
         return {"title": "My Song", "lyrics_text": raw_text, "verses": []}
 
 
-def generate_chords(lyrics_text: str) -> dict:
-    """Suggest simple ukulele chords for a kids song.
+DEFAULT_TEMPO_BPM = 120
+DEFAULT_STYLE = "kids pop"
+
+# Sane musical bounds. music_gen.arrangement_to_wav already floors at 40 BPM;
+# clamping here keeps an implausible model answer from reaching the synth.
+_MIN_TEMPO_BPM = 40
+_MAX_TEMPO_BPM = 208
+
+
+def coerce_tempo(value, fallback: int = DEFAULT_TEMPO_BPM) -> int:
+    """Return *value* as a BPM int clamped to a playable range, else *fallback*.
+
+    Never raises: json.loads accepts non-standard ``Infinity``/``NaN``/``1e999``,
+    and int(inf) raises OverflowError — so every conversion failure degrades to
+    *fallback* rather than propagating to the caller.
+    """
+    try:
+        tempo = int(round(float(value)))
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return max(_MIN_TEMPO_BPM, min(_MAX_TEMPO_BPM, tempo))
+
+
+def coerce_style(value, fallback: str = DEFAULT_STYLE) -> str:
+    """Return *value* as a non-empty style string, else *fallback*.
+
+    Never raises: Claude may return a non-string (e.g. a list of adjectives),
+    which would break a bare ``.strip()``.
+    """
+    if not isinstance(value, str):
+        return fallback
+    return value.strip() or fallback
+
+
+def generate_chords(
+    lyrics_text: str,
+    style: str | None = None,
+    tempo_bpm: int | None = None,
+) -> dict:
+    """Suggest simple ukulele chords, a tempo, and a style for a kids song.
 
     Args:
         lyrics_text: The full song lyrics as a string.
+        style: Optional musical style (e.g. "upbeat", "lullaby").  When given
+            it steers Claude's tempo choice and is echoed back verbatim, so the
+            user's pick — not a model guess — is what reaches the synth.
+        tempo_bpm: Optional explicit tempo.  When given it overrides Claude's
+            suggestion entirely.
 
     Returns:
-        dict with at least: chords (list[str]), chord_chart (str).
+        dict with keys: chords (list[str]), chord_chart (str),
+        tempo_bpm (int), style (str).
 
     Raises:
         RuntimeError: If the Claude API call fails.
@@ -136,16 +180,29 @@ def generate_chords(lyrics_text: str) -> dict:
     if len(lyrics_text.strip()) < 20:
         raise ValueError("Lyrics are too short — add more content before generating chords")
 
+    requested_style = (style or "").strip()
+    # An explicit tempo is user intent and always wins over the model's guess.
+    forced_tempo = coerce_tempo(tempo_bpm, fallback=0) if tempo_bpm is not None else 0
+
     client = _get_client()
     system_prompt = (
         "You are a music teacher specialising in simple ukulele arrangements for children. "
         "Suggest beginner-friendly chords that match the mood and rhythm of the lyrics."
     )
+    style_note = (
+        f"The song should be in a {requested_style} style — pick a tempo that suits it.\n"
+        if requested_style
+        else "Infer the style and tempo from the mood and rhythm of the lyrics.\n"
+    )
     user_prompt = (
-        "Suggest simple ukulele chords for the following kids song lyrics. "
+        "Suggest simple ukulele chords for the following kids song lyrics.\n"
+        f"{style_note}"
         "Return a JSON object with keys: "
         '"chords" (array of chord names used, e.g. ["C", "G", "Am", "F"]), '
-        '"chord_chart" (string showing chord placements above lyric lines). '
+        '"chord_chart" (string showing chord placements above lyric lines), '
+        f'"tempo_bpm" (integer beats per minute between {_MIN_TEMPO_BPM} and '
+        f"{_MAX_TEMPO_BPM}; kids songs are typically 90-140), "
+        '"style" (short style descriptor, e.g. "upbeat kids pop", "gentle lullaby"). '
         "Output only the JSON object with no additional text.\n\n"
         f"Lyrics:\n{lyrics_text}"
     )
@@ -164,10 +221,18 @@ def generate_chords(lyrics_text: str) -> dict:
     logger.debug("generate_chords raw response: %s", raw_text)
 
     try:
-        return json.loads(_strip_fences(raw_text))
+        result = json.loads(_strip_fences(raw_text))
+        if not isinstance(result, dict):
+            raise json.JSONDecodeError("expected a JSON object", raw_text, 0)
     except json.JSONDecodeError:
         logger.warning("generate_chords: could not parse JSON; returning fallback")
-        return {"chords": [], "chord_chart": raw_text}
+        result = {"chords": [], "chord_chart": raw_text}
+
+    # Guarantee tempo_bpm/style are always present and sane, whatever Claude
+    # returned — generate_instrumental reads these straight off chords.json.
+    result["tempo_bpm"] = forced_tempo or coerce_tempo(result.get("tempo_bpm"))
+    result["style"] = requested_style or coerce_style(result.get("style"))
+    return result
 
 
 def generate_music_arrangement(
