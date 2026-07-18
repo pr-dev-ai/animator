@@ -430,14 +430,8 @@ def _gen_plate(setting: str, out_path: Path):
         shutil.move(str(produced), str(out_path))
     if not out_path.is_file():
         raise RuntimeError(r.stderr[-300:] or "plate not produced")
-    # flatten the plate to flat-cartoon scenery (outlined shapes, flat colour) so it
-    # matches the cartoon characters instead of a painterly backdrop.
-    try:
-        from cartoonify import cartoonify
-        from PIL import Image
-        cartoonify(Image.open(out_path), colors=16, silhouette=False, edges=True).convert("RGB").save(out_path)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[puppet_video] plate cartoonify skipped: {exc}")
+    # the flat model already renders flat-cartoon scenery (soft outlines, flat colour),
+    # so no cartoonify pass here — posterising only muddied it, as with characters.
 
 
 if __name__ == "__main__":
