@@ -35,20 +35,21 @@ def _is_human(name: str) -> bool:
     return any(w in n for w in _HUMAN_WORDS)
 
 
-# Cultural default for human characters. The image checkpoint is anime-tuned and
-# defaults to Japanese anime figures; this steers people to the project's culture.
-# Change per project/theme (this app makes Hindi/Indian kids' content).
-CHARACTER_CULTURE = "Indian"
-
-
-def _prompt(name):
+def _prompt(name, culture=None):
     if _is_human(name):
+        # culture is set per-project (e.g. "Indian" for Hindi songs). We add the
+        # cultural cue + traditional clothing but do NOT force a skin tone — Indians
+        # (and everyone) span a wide range, so let SD vary it naturally. Without a
+        # culture, stay neutral (no ethnicity forced) and just avoid the anime default.
+        who = f"{culture} {name}" if culture else name
+        # Indian cue adds black hair + traditional clothing; neutral stays unforced.
+        details = "black hair, wearing colourful traditional Indian clothes, " if culture == "Indian" else ""
         return (
             "cartoon, flat color, children's storybook illustration, 2d, bold clean outlines, "
-            f"simple shapes, cute, ONE single solo cartoon {CHARACTER_CULTURE} {name}, "
-            "brown skin, black hair, wearing colourful traditional Indian clothes, big dark eyes, "
-            "alone, a single pose, full body, strict side view profile facing left, standing, "
-            "a distinct visible mouth, happy, plain solid white background, no scenery, centered"
+            f"simple shapes, cute, ONE single solo cartoon {who}, {details}"
+            "big friendly eyes, alone, a single pose, full body, strict side view profile facing "
+            "left, standing, a distinct visible mouth, happy, plain solid white background, "
+            "no scenery, centered"
         )
     return (
         "cartoon, flat color, children's illustration, 2d, bold clean outlines, simple shapes, cute, "
@@ -104,12 +105,12 @@ def generate(name):
                 break
 
 
-def cut(name, candidate):
+def cut(name, candidate, out=None):
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
     from rembg import remove, new_session
 
-    out = LIB / name
+    out = Path(out) if out else (LIB / name)
     out.mkdir(parents=True, exist_ok=True)
     img = Image.open(candidate).convert("RGB")
     W, H = img.size
@@ -161,14 +162,14 @@ def cut(name, candidate):
           f"mouth_anchor {mouth_anchor}  -> {out/'rig.json'}")
 
 
-def _generate_one(name, seed):
+def _generate_one(name, seed, culture=None, out=None):
     """Generate a single isolated-on-white candidate; return its path."""
     sys.path.insert(0, r"C:\pradeep\animator\web_ui")
     import pipeline_api as P
     ckpt = P._find_checkpoint()
-    out = LIB / name
+    out = Path(out) if out else (LIB / name)
     out.mkdir(parents=True, exist_ok=True)
-    wf = P._comfyui_workflow(_prompt(name), _neg(name), f"char_{name}_{seed}", ckpt)
+    wf = P._comfyui_workflow(_prompt(name, culture), _neg(name), f"char_{name}_{seed}", ckpt)
     for node in wf.values():
         if node.get("class_type") == "KSampler":
             node["inputs"]["seed"] = seed
@@ -217,20 +218,28 @@ def _score_candidate(path) -> float:
     return single_share - 2.2 * width_pen
 
 
-def ensure_rig(name, char_dir=None) -> Path:
+def _rig_dir(name, culture=None) -> Path:
+    """Library dir for a character, namespaced by culture so a Hindi project's
+    Indian 'girl' and an English project's neutral 'girl' don't collide."""
+    slug = f"{name}__{culture.lower()}" if culture else name
+    return LIB / slug
+
+
+def ensure_rig(name, culture=None, char_dir=None) -> Path:
     """Return a ready rig dir for *name*, building it if absent.
 
-    Generates a few candidates and AUTO-PICKS the cleanest single figure (rejects
-    turnaround sheets / multi-figure), then cuts + rigs it. Idempotent: an existing
-    rig.json is reused, so the cost is paid once per character.
+    *culture* (e.g. "Indian" for Hindi projects) steers human characters and
+    namespaces the library dir. Generates a few candidates and AUTO-PICKS the
+    cleanest single figure (rejects turnaround sheets / multi-figure), then cuts +
+    rigs it. Idempotent: an existing rig.json is reused, so cost is paid once.
     """
-    d = Path(char_dir) if char_dir else (LIB / name)
+    d = Path(char_dir) if char_dir else _rig_dir(name, culture)
     if (d / "rig.json").is_file():
         return d
     seeds = [7, 42, 101, 250] if _is_human(name) else [7, 88, 205]  # humans are pickier
     best, best_score = None, -1e9
     for s in seeds:
-        cand = _generate_one(name, s)
+        cand = _generate_one(name, s, culture=culture, out=d)
         if not cand:
             continue
         try:
@@ -243,8 +252,8 @@ def ensure_rig(name, char_dir=None) -> Path:
             break
     if not best:
         raise RuntimeError(f"could not generate character '{name}'")
-    cut(name, str(best))
-    return LIB / name
+    cut(name, str(best), out=d)
+    return d
 
 
 if __name__ == "__main__":
@@ -253,4 +262,5 @@ if __name__ == "__main__":
     elif sys.argv[1] == "cut":
         cut(sys.argv[2], sys.argv[3])
     elif sys.argv[1] == "ensure":
-        print(ensure_rig(sys.argv[2]))
+        culture = sys.argv[3] if len(sys.argv) > 3 else None
+        print(ensure_rig(sys.argv[2], culture=culture))

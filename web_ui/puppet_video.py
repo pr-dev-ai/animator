@@ -75,7 +75,22 @@ def _read_scenes(project: str):
     return shots
 
 
-def _resolve_rig(character: str):
+# Language code -> human-character culture. Indian characters are used only for
+# Hindi projects; every other language stays neutral (no ethnicity forced).
+_LANG_CULTURE = {"hi": "Indian", "hindi": "Indian"}
+
+
+def _project_culture(project: str):
+    """Human-character culture for a project, from its language.txt (Hindi -> Indian)."""
+    lang_file = PROJECTS_DIR / project / "language.txt"
+    try:
+        code = lang_file.read_text(encoding="utf-8").strip().lower()
+    except Exception:  # noqa: BLE001
+        return None
+    return _LANG_CULTURE.get(code)
+
+
+def _resolve_rig(character: str, culture=None):
     """Return a ready (rig_dir, rig_dict) for a character, building it if needed."""
     import build_character_rig as bcr
     name = (character or "").strip().lower() or "duck"
@@ -83,7 +98,7 @@ def _resolve_rig(character: str):
     if name == "duck" and (OUTPUTS_DIR / "duck_rig" / "rig.json").is_file():
         d = OUTPUTS_DIR / "duck_rig"
     else:
-        d = bcr.ensure_rig(name)
+        d = bcr.ensure_rig(name, culture=culture)
     return d, json.loads((d / "rig.json").read_text())
 
 
@@ -104,6 +119,9 @@ def prepare_assets(project: str) -> Generator[str, None, None]:
         yield f"ERROR: no scenes for '{project}' — plan the storyboard first"
         return
     yield f"Preparing puppet assets for {len(scenes)} scenes..."
+    culture = _project_culture(project)
+    if culture:
+        yield f"  human characters styled as {culture} (project language)"
     from claude_api import direct_scenes
     choreo = direct_scenes(scenes)
 
@@ -133,7 +151,7 @@ def prepare_assets(project: str) -> Generator[str, None, None]:
             if character not in rig_cache:
                 yield f"[{idx}/{len(scenes)}] {sid}: building '{character}' character..."
                 try:
-                    rig_cache[character] = _resolve_rig(character)
+                    rig_cache[character] = _resolve_rig(character, culture)
                 except Exception as exc:  # noqa: BLE001
                     yield f"  character build failed ({exc}); skipping puppet"
                     rig_cache[character] = None
@@ -205,6 +223,7 @@ def build_music_video(project: str) -> Generator[str, None, None]:
 
     # --- Claude directs every scene in one call ---
     yield "Directing scenes with Claude..."
+    culture = _project_culture(project)   # Hindi -> Indian human characters
     from claude_api import direct_scenes
     choreo = direct_scenes(scenes)
 
@@ -250,7 +269,7 @@ def build_music_video(project: str) -> Generator[str, None, None]:
             if character not in rig_cache:
                 yield f"[{idx}/{len(scenes)}] {sid}: preparing '{character}' rig..."
                 try:
-                    rig_cache[character] = _resolve_rig(character)
+                    rig_cache[character] = _resolve_rig(character, culture)
                 except Exception as exc:  # noqa: BLE001
                     yield f"  rig build failed for '{character}' ({exc}); using duck"
                     rig_cache[character] = _resolve_rig("duck")
