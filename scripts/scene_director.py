@@ -37,6 +37,87 @@ def _win(times, t0, t1):
     return [t for t in times if t0 <= t < t1]
 
 
+# --- living-world overlay FX (drifting clouds / floating sparkles / twinkling stars) ---
+_NIGHT_WORDS = ("night", "moon", "star", "dream", "sleep", "lullaby", "dark", "twinkl")
+_OUTDOOR_WORDS = ("sky", "garden", "park", "meadow", "hill", "field", "outside", "outdoor",
+                  "forest", "cloud", "mountain", "sea", "beach", "street", "road", "village",
+                  "farm", "jungle", "rainbow")
+# deterministic scatter (relative x,y in [0,1]) — no RNG, keeps the render cache stable
+_SPARKLE_POS = [(0.16, 0.28), (0.74, 0.22), (0.42, 0.52), (0.86, 0.58), (0.26, 0.70), (0.60, 0.40)]
+_STAR_POS = [(0.12, 0.16), (0.30, 0.11), (0.50, 0.19), (0.68, 0.13), (0.83, 0.24),
+             (0.21, 0.32), (0.58, 0.33), (0.90, 0.38)]
+
+
+def _fx_kind(choreo):
+    text = f"{choreo.get('setting', '')} {choreo.get('mood', '')}".lower()
+    if any(w in text for w in _NIGHT_WORDS):
+        return "night"
+    if any(w in text for w in _OUTDOOR_WORDS):
+        return "outdoor"
+    return "indoor"
+
+
+def fx_layers(choreo, dur, W=CANVAS[0], H=CANVAS[1]):
+    """Animated overlay layers that make the WORLD move (not just the character).
+
+    Chosen by scene kind: outdoor -> drifting clouds; night -> twinkling stars +
+    floating sparkles; indoor/unknown -> gentle floating sparkles (dreamy motes).
+    All sprites are procedural + cached (scripts/gen_fx). Returns [] on failure so a
+    missing FX asset never breaks a render.
+    """
+    try:
+        import gen_fx
+    except Exception:  # noqa: BLE001
+        return []
+    kind = _fx_kind(choreo)
+    layers = []
+
+    def sample(fn, step=0.3):
+        kf, t = [], 0.0
+        while t <= dur + 1e-6:
+            kf.append(fn(t)); t += step
+        kf.append(fn(dur))
+        return kf
+
+    if kind == "outdoor":
+        cloud = str(gen_fx.ensure_fx("cloud"))
+        for i, (rx, ry, drift, sc) in enumerate([(0.22, 0.18, 90, 1.0), (0.62, 0.28, 60, 0.8)]):
+            x0, y0 = rx * W, ry * H
+            layers.append({"name": f"fx_cloud{i}", "image": cloud, "z": 1, "anchor": [240, 130],
+                           "keyframes": sample(lambda t, x0=x0, y0=y0, drift=drift, sc=sc: {
+                               "t": round(t, 3),
+                               "pos": [int(x0 + drift * (t / max(0.1, dur))),
+                                       int(y0 + 6 * math.sin(2 * math.pi * t / 6.0))],
+                               "scale": sc, "easing": "linear"}, step=0.5)})
+    elif kind == "night":
+        star = str(gen_fx.ensure_fx("star"))
+        for i, (rx, ry) in enumerate(_STAR_POS):
+            x0, y0, ph = int(rx * W), int(ry * H), i * 0.8
+            layers.append({"name": f"fx_star{i}", "image": star, "z": 1, "anchor": [20, 20],
+                           "keyframes": sample(lambda t, x0=x0, y0=y0, ph=ph: {
+                               "t": round(t, 3), "pos": [x0, y0],
+                               "scale": round(0.5 + 0.6 * (0.5 + 0.5 * math.sin(2 * math.pi * t / 1.5 + ph)), 3),
+                               "easing": "ease_in_out"})})
+        _add_sparkles(layers, gen_fx, dur, W, H, sample, count=3)
+    else:
+        _add_sparkles(layers, gen_fx, dur, W, H, sample, count=4)
+    return layers
+
+
+def _add_sparkles(layers, gen_fx, dur, W, H, sample, count):
+    sp = str(gen_fx.ensure_fx("sparkle"))
+    for i in range(count):
+        rx, ry = _SPARKLE_POS[i % len(_SPARKLE_POS)]
+        x0, y0, ph = rx * W, ry * H, i * 1.3
+        layers.append({"name": f"fx_sparkle{i}", "image": sp, "z": 6, "anchor": [32, 32],
+                       "keyframes": sample(lambda t, x0=x0, y0=y0, ph=ph: {
+                           "t": round(t, 3),
+                           "pos": [int(x0 + 16 * math.sin(2 * math.pi * t / 3.0 + ph)),
+                                   int(y0 - 42 * (t / max(0.1, dur)))],
+                           "scale": round(0.7 + 0.45 * (0.5 + 0.5 * math.sin(2 * math.pi * t / 1.2 + ph)), 3),
+                           "easing": "ease_in_out"})})
+
+
 def _body_motion(choreo, beats, dur, pos, scale, intensity):
     """Rich per-action body motion — the difference between a cartoon and a sticker.
 
@@ -73,8 +154,11 @@ def _body_motion(choreo, beats, dur, pos, scale, intensity):
             bounce = -18 * amp * abs(math.sin(math.pi * ph))
             rock = 6 * math.sin(2 * math.pi * (t / (2 * step)))
         down = (i % 2 == 0)
-        sx = round(scale * (1.06 if down else 0.98), 3)
-        sy = round(scale * (0.94 if down else 1.04), 3)
+        # breathing: slow chest rise/fall (~2.4s), so even a near-still character
+        # is never frozen; combines with the per-step squash below.
+        breathe = 1.0 + 0.028 * math.sin(2 * math.pi * t / 2.4)
+        sx = round(scale * (1.06 if down else 0.98) / breathe, 3)
+        sy = round(scale * (0.94 if down else 1.04) * breathe, 3)
         kf.append({"t": round(t, 3), "pos": [x, int(y0 + bounce)], "rot": round(rock, 1),
                    "scale": [sx, sy], "easing": "ease_in_out"})
         t += step / 2
@@ -149,10 +233,14 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
         layers.append({"name": "wing", "image": str(rig_dir / wp["image"]),
                        "z": wp["z"], "parent": "body", "anchor": list(wp["anchor"]), "keyframes": wkf})
 
+    # living-world overlays (drifting clouds / sparkles / stars) behind & in front
+    fx = fx_layers(choreo, dur)
+    layers += fx
+
     spec = {"fps": FPS, "duration": round(dur, 3), "resolution": list(CANVAS),
             "layers": layers, "camera": _camera_move(choreo, dur)}
     print(f"[scene_director] char={rig['name']} action={choreo.get('body_motion')} "
-          f"cam={choreo.get('camera')} beats={len(beats)} lip={lip}")
+          f"cam={choreo.get('camera')} beats={len(beats)} lip={lip} fx={_fx_kind(choreo)}({len(fx)})")
     return spec
 
 

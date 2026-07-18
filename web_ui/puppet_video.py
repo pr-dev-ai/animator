@@ -261,12 +261,16 @@ def build_music_video(project: str, captions: bool = False) -> Generator[str, No
                 plate = fallbacks[0]
 
         if not character:
-            # title card / no-character scene: background + gentle camera only.
+            # title card / no-character scene: background + gentle camera + living-
+            # world overlays (drifting clouds / sparkles / stars), so even a
+            # character-less shot isn't a static painting.
+            import scene_director
+            bg_layer = {"name": "bg", "image": str(Path(plate).resolve()), "z": 0,
+                        "anchor": [576, 384],
+                        "keyframes": [{"t": 0.0, "pos": [576, 384], "scale": 1.0, "easing": "ease_in_out"},
+                                      {"t": round(dur, 3), "pos": [576, 384], "scale": 1.06}]}
             spec = {"fps": FPS, "duration": round(dur, 3), "resolution": list(CANVAS),
-                    "layers": [{"name": "bg", "image": str(Path(plate).resolve()), "z": 0,
-                                "anchor": [576, 384],
-                                "keyframes": [{"t": 0.0, "pos": [576, 384], "scale": 1.0, "easing": "ease_in_out"},
-                                              {"t": round(dur, 3), "pos": [576, 384], "scale": 1.06}]}],
+                    "layers": [bg_layer] + scene_director.fx_layers(ch, dur),
                     "camera": {"keyframes": [{"t": 0.0, "pos": [576, 384], "zoom": 1.02, "easing": "ease_in_out"},
                                              {"t": round(dur, 3), "pos": [576, 384], "zoom": 1.10}]}}
             character = "(none)"
