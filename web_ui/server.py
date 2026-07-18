@@ -672,9 +672,12 @@ def storyboards_generate() -> Response | tuple[Response, int]:
     if not prompts_file.exists():
         return _err("No prompts found — generate prompts first", 400)
     try:
-        from web_ui import pipeline_api  # lazy import
+        # Storyboard now builds the PUPPET-READY assets (isolated character rigs +
+        # scenery plates) and a composed preview per scene, so the gallery shows
+        # exactly what the Animate stage will animate — no separate/ignored images.
+        from web_ui import puppet_video  # lazy import
 
-        return _sse_stream(pipeline_api.generate_storyboard_images, project)
+        return _sse_stream(puppet_video.prepare_assets, project)
     except Exception as exc:
         logger.exception("storyboards_generate failed")
         return _err(str(exc))

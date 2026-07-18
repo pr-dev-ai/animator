@@ -87,6 +87,74 @@ def _resolve_rig(character: str):
     return d, json.loads((d / "rig.json").read_text())
 
 
+def prepare_assets(project: str) -> Generator[str, None, None]:
+    """Storyboard stage for the puppet pipeline: build the exact assets the video
+    will use, and a composed preview of each scene.
+
+    For each scene: Claude directs it, the cast rig is auto-built (reused across
+    scenes for consistency), a scenery-only plate is generated, and a static
+    PREVIEW (character auto-placed on its plate) is written to
+    outputs/<project>_storyboards/<shot>.png — so the storyboard gallery shows
+    exactly what the animation will animate.  Idempotent: existing rigs/plates are
+    reused.  Yields progress; final line "DONE" or "ERROR: ...".
+    """
+    from PIL import Image
+    scenes = _read_scenes(project)
+    if not scenes:
+        yield f"ERROR: no scenes for '{project}' — plan the storyboard first"
+        return
+    yield f"Preparing puppet assets for {len(scenes)} scenes..."
+    from claude_api import direct_scenes
+    choreo = direct_scenes(scenes)
+
+    sb_dir = OUTPUTS_DIR / f"{project}_storyboards"
+    sb_dir.mkdir(parents=True, exist_ok=True)
+    plate_dir = OUTPUTS_DIR / "bg_plates"
+    plate_dir.mkdir(parents=True, exist_ok=True)
+    rig_cache = {}
+
+    for idx, s in enumerate(scenes, 1):
+        sid = s["shot_id"]
+        ch = choreo.get(sid, {})
+        character = (ch.get("character") or "").strip()
+        setting = ch.get("setting") or "sunny park meadow"
+
+        plate = plate_dir / f"plate_{_sha(setting)}.png"
+        if not plate.is_file():
+            yield f"[{idx}/{len(scenes)}] {sid}: generating background ({setting[:30]})..."
+            try:
+                _gen_plate(setting, plate)
+            except Exception as exc:  # noqa: BLE001
+                yield f"  background gen failed ({exc})"
+                continue
+
+        comp = Image.open(plate).convert("RGBA").resize(CANVAS)
+        if character:
+            if character not in rig_cache:
+                yield f"[{idx}/{len(scenes)}] {sid}: building '{character}' character..."
+                try:
+                    rig_cache[character] = _resolve_rig(character)
+                except Exception as exc:  # noqa: BLE001
+                    yield f"  character build failed ({exc}); skipping puppet"
+                    rig_cache[character] = None
+            if rig_cache[character]:
+                rig_dir, rig = rig_cache[character]
+                pos, scale = _auto_place(rig_dir, rig)
+                body = Image.open(rig_dir / rig["parts"]["body"]["image"]).convert("RGBA")
+                bw, bh = int(body.width * scale), int(body.height * scale)
+                body = body.resize((bw, bh))
+                ax, ay = rig["body_anchor"]
+                topleft = (int(pos[0] - ax * scale), int(pos[1] - ay * scale))
+                comp.alpha_composite(body, topleft)
+        preview = sb_dir / f"{sid}.png"
+        comp.convert("RGB").save(preview)
+        label = character or "(scenery)"
+        yield f"[{idx}/{len(scenes)}] {sid} preview ready ({label})"
+
+    yield f"Assets ready — {len(rig_cache)} characters, previews in the gallery."
+    yield "DONE"
+
+
 def build_music_video(project: str) -> Generator[str, None, None]:
     """Build outputs/<project>_animated.mp4 from the puppet pipeline."""
     import animation_api as A       # proven resumable render + concat/mux helpers
