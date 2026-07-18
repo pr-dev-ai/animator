@@ -30,9 +30,25 @@ _HUMAN_WORDS = {
 }
 
 
+_MALE_WORDS = {"boy", "brother", "man", "father", "dad", "grandfather", "grandpa",
+               "uncle", "son", "guy", "bhaiya", "papa"}
+_FEMALE_WORDS = {"girl", "sister", "woman", "mother", "mom", "mum", "grandmother",
+                 "grandma", "aunt", "daughter", "lady", "bahan", "didi", "mummy"}
+
+
 def _is_human(name: str) -> bool:
     n = (name or "").lower()
     return any(w in n for w in _HUMAN_WORDS)
+
+
+def _gender(name: str):
+    """'male' / 'female' / None from the character name (None = leave unforced)."""
+    n = (name or "").lower()
+    if any(w in n for w in _MALE_WORDS):
+        return "male"
+    if any(w in n for w in _FEMALE_WORDS):
+        return "female"
+    return None
 
 
 def _prompt(name, culture=None):
@@ -42,8 +58,19 @@ def _prompt(name, culture=None):
         # (and everyone) span a wide range, so let SD vary it naturally. Without a
         # culture, stay neutral (no ethnicity forced) and just avoid the anime default.
         who = f"{culture} {name}" if culture else name
-        # Indian cue adds black hair + traditional clothing; neutral stays unforced.
-        details = "black hair, wearing colourful traditional Indian clothes, " if culture == "Indian" else ""
+        gender = _gender(name)
+        # Clothing carries a strong gender signal: 'traditional Indian clothes'
+        # alone renders female (a lehenga/saree), which is why 'big brother' used to
+        # come out a girl. Pick attire by gender so boys read as boys.
+        if culture == "Indian":
+            if gender == "male":
+                details = "black hair, wearing a colourful kurta pajama, "
+            elif gender == "female":
+                details = "black hair, wearing a colourful traditional Indian lehenga dress, "
+            else:
+                details = "black hair, wearing colourful traditional Indian clothes, "
+        else:
+            details = ""
         return (
             "cartoon, flat color, children's storybook illustration, 2d, bold clean outlines, "
             f"simple shapes, cute, ONE single solo cartoon {who}, {details}"
@@ -65,9 +92,15 @@ def _neg(name):
     if _is_human(name):
         # humans need arms/hands, but SD defaults to anime turnaround sheets — kill
         # both the sheets and the anime/pale-skin default so we get one Indian figure
-        return (base + ", character sheet, reference sheet, model sheet, turnaround, "
-                "multiple views, multiple poses, three views, front and back, grid, duplicate, "
-                "anime, japanese, manga, pale skin, white skin, blonde hair, pink hair, blue eyes")
+        neg = (base + ", character sheet, reference sheet, model sheet, turnaround, "
+               "multiple views, multiple poses, three views, front and back, grid, duplicate, "
+               "anime, japanese, manga, pale skin, white skin, blonde hair, pink hair, blue eyes")
+        gender = _gender(name)
+        if gender == "male":      # keep a 'brother'/'boy' from drifting female
+            neg += ", girl, woman, dress, saree, lehenga, skirt, female"
+        elif gender == "female":
+            neg += ", beard, moustache, man, male"
+        return neg
     return base + ", human, humanoid, person, arms, hands"
 
 
