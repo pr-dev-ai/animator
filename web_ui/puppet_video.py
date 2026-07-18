@@ -24,6 +24,9 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 PROJECTS_DIR = REPO_ROOT / "projects"
 sys.path.insert(0, str(SCRIPTS_DIR))
+# web_ui dir too, so bare imports of sibling modules (animation_api, claude_api)
+# resolve whether we run as a CLI script or imported as a package by the server.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 FPS = 24
 CANVAS = (1152, 768)
