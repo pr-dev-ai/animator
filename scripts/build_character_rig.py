@@ -74,8 +74,8 @@ def _prompt(name, culture=None):
         return (
             "cartoon, flat color, children's storybook illustration, 2d, bold clean outlines, "
             f"simple shapes, cute, ONE single solo cartoon {who}, {details}"
-            "big friendly eyes, alone, a single pose, full body, strict side view profile facing "
-            "left, standing, a distinct visible mouth, happy, plain solid white background, "
+            "big friendly eyes, alone, a single pose, full body, standing, facing forward, "
+            "a distinct visible mouth, happy, plain solid white background, "
             "no scenery, centered"
         )
     return (
@@ -87,14 +87,19 @@ def _prompt(name, culture=None):
 
 
 def _neg(name):
-    base = ("front view, three-quarter, 3/4 view, back view, multiple characters, two figures, "
-            "scenery, background, realistic, photo, dark, cropped, extra limbs")
+    # flat2DAnimerge IS an anime-based flat model, so we no longer negate "anime"
+    # (that fought the very style we want). Instead kill its bad habits: companion
+    # creatures, paint-splatter backdrops, and extreme chibi.
+    base = ("back view, multiple characters, two figures, scenery, background, realistic, "
+            "photo, dark, cropped, extra limbs, extra character, companion, mascot, "
+            "creature, pet, ball, extra object, paint splatter, paint splash, "
+            "messy background, colored background, brush strokes, sketchy lines, "
+            "swirls, ribbons, banners, flames, aura, glow, magic effects, floating petals, "
+            "watermark, text")
     if _is_human(name):
-        # humans need arms/hands, but SD defaults to anime turnaround sheets — kill
-        # both the sheets and the anime/pale-skin default so we get one Indian figure
         neg = (base + ", character sheet, reference sheet, model sheet, turnaround, "
-               "multiple views, multiple poses, three views, front and back, grid, duplicate, "
-               "anime, japanese, manga, pale skin, white skin, blonde hair, pink hair, blue eyes")
+               "multiple views, multiple poses, grid, duplicate, chibi, super deformed, "
+               "japanese, pale skin, white skin, blonde hair, blue eyes")
         gender = _gender(name)
         if gender == "male":      # keep a 'brother'/'boy' from drifting female
             neg += ", girl, woman, dress, saree, lehenga, skirt, female"
@@ -204,6 +209,23 @@ def _mouth_region(cut_rgba, bbox):
     return mcx - mw // 2, mcy - mh // 2, mcx + mw // 2, mcy + mh // 2
 
 
+def _largest_component(rgba):
+    """Keep only the largest connected opaque blob (the character), zeroing the
+    alpha of floating decorations the flat model likes to scatter around."""
+    import numpy as np
+    from PIL import Image
+    from scipy import ndimage
+    arr = np.asarray(rgba).copy()
+    solid = arr[:, :, 3] > 40
+    lbl, n = ndimage.label(solid)
+    if n <= 1:
+        return rgba
+    sizes = ndimage.sum(solid, lbl, range(1, n + 1))
+    keep = int(np.argmax(sizes)) + 1
+    arr[:, :, 3] = np.where(lbl == keep, arr[:, :, 3], 0)
+    return Image.fromarray(arr, "RGBA")
+
+
 def cut(name, candidate, out=None):
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
@@ -218,9 +240,10 @@ def cut(name, candidate, out=None):
     cw, ch = img.size
 
     cut_rgba = remove(img, session=new_session("isnet-anime"))
-    # flatten to flat-cartoon art (bold silhouette outline + cel-lines + flat colour)
-    from cartoonify import cartoonify
-    cut_rgba = cartoonify(cut_rgba, colors=12, silhouette=True, edges=True)
+    # the flat model already draws flat colour + bold outlines (cartoonify would only
+    # muddy it), but it likes to add floating decorations (swirls/ribbons); keep just
+    # the main connected figure so those drop out.
+    cut_rgba = _largest_component(cut_rgba)
     cut_rgba.save(out / "body.png")
     alpha = np.asarray(cut_rgba)[:, :, 3]
     ys, xs = np.where(alpha > 30)

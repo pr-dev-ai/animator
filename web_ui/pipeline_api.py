@@ -233,6 +233,7 @@ def import_audio(project: str, shot_id: str, character: str, wav_bytes: bytes) -
 # v1-5-pruned-emaonly is a research BASE model, not an art model: it is the
 # last-resort fallback only, hence its absence from this list.
 _CHECKPOINT_PREFERENCE = (
+    "flat2danimerge",              # flat-colour + bold-outline: the cartoon look
     "childrensstories_v1toonanime",
     "childrensstories",
     "dreamshaper",
