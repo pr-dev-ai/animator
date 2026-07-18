@@ -123,8 +123,55 @@ def cut(name, candidate):
           f"mouth_anchor {mouth_anchor}  -> {out/'rig.json'}")
 
 
+def _generate_one(name, seed):
+    """Generate a single isolated-on-white candidate; return its path."""
+    sys.path.insert(0, r"C:\pradeep\animator\web_ui")
+    import pipeline_api as P
+    ckpt = P._find_checkpoint()
+    out = LIB / name
+    out.mkdir(parents=True, exist_ok=True)
+    wf = P._comfyui_workflow(_prompt(name), NEG, f"char_{name}_{seed}", ckpt)
+    for node in wf.values():
+        if node.get("class_type") == "KSampler":
+            node["inputs"]["seed"] = seed
+    req = urllib.request.Request(f"{COMFY}/prompt", data=json.dumps({"prompt": wf}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    pid = json.loads(urllib.request.urlopen(req, timeout=30).read())["prompt_id"]
+    for _ in range(120):
+        time.sleep(3)
+        h = json.loads(urllib.request.urlopen(f"{COMFY}/history/{pid}", timeout=10).read())
+        if pid in h:
+            for node in h[pid]["outputs"].values():
+                for img in node.get("images", []):
+                    url = f"{COMFY}/view?" + urllib.parse.urlencode(
+                        {"filename": img["filename"], "subfolder": img.get("subfolder", ""),
+                         "type": img["type"]})
+                    p = out / f"cand_seed{seed}.png"
+                    p.write_bytes(urllib.request.urlopen(url, timeout=30).read())
+                    return p
+    return None
+
+
+def ensure_rig(name, char_dir=None) -> Path:
+    """Return a ready rig dir for *name*, building it (seed 7) if absent.
+
+    Idempotent: an existing rig.json is reused, so the orchestrator only pays the
+    generate+cut cost the first time a character appears.
+    """
+    d = Path(char_dir) if char_dir else (LIB / name)
+    if (d / "rig.json").is_file():
+        return d
+    cand = _generate_one(name, 7)
+    if not cand:
+        raise RuntimeError(f"could not generate character '{name}'")
+    cut(name, str(cand))
+    return LIB / name
+
+
 if __name__ == "__main__":
     if sys.argv[1] == "generate":
         generate(sys.argv[2])
     elif sys.argv[1] == "cut":
         cut(sys.argv[2], sys.argv[3])
+    elif sys.argv[1] == "ensure":
+        print(ensure_rig(sys.argv[2]))
