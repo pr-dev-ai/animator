@@ -746,8 +746,9 @@ _CAMERAS = ("hold", "push_in", "pull_out", "pan_left", "pan_right")
 
 def _fallback_choreo(reason: str = "default (Claude unavailable)") -> dict:
     """Sane choreography when Claude can't direct a scene."""
-    return {"character": "", "sings": True, "body_motion": "bob",
-            "camera": "push_in", "intensity": 0.6, "mood": "happy", "reason": reason}
+    return {"character": "", "setting": "sunny park meadow", "sings": True,
+            "body_motion": "bob", "camera": "push_in", "intensity": 0.6,
+            "mood": "happy", "reason": reason}
 
 
 def direct_scenes(shots: list[dict]) -> dict:
@@ -779,6 +780,9 @@ def direct_scenes(shots: list[dict]) -> dict:
             '  "shot_id" (echo the id),\n'
             '  "character" (the main animal/character, e.g. "duck", "bunny", '
             '"squirrel"; "" if none/title card),\n'
+            '  "setting" (2-5 words describing ONLY the scenery/location for the '
+            'background, with NO animals or characters, e.g. "sunny park meadow", '
+            '"pond with lily pads", "grassy hill with trees"),\n'
             '  "sings" (boolean: is this character singing/vocalising here? drives lip-sync),\n'
             f'  "body_motion" (one of {", ".join(_BODY_MOTIONS)}),\n'
             f'  "camera" (one of {", ".join(_CAMERAS)}),\n'
@@ -802,6 +806,7 @@ def direct_scenes(shots: list[dict]) -> dict:
             if sid in result:
                 result[sid] = {
                     "character": str(item.get("character", "")).strip(),
+                    "setting": str(item.get("setting", "")).strip()[:80],
                     "sings": bool(item.get("sings", True)),
                     "body_motion": item.get("body_motion") if item.get("body_motion") in _BODY_MOTIONS else "bob",
                     "camera": item.get("camera") if item.get("camera") in _CAMERAS else "push_in",

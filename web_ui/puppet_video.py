@@ -143,8 +143,9 @@ def build_music_video(project: str) -> Generator[str, None, None]:
         ch = choreo.get(sid, {})
         character = (ch.get("character") or "").strip()   # empty => background-only scene
 
-        # background plate per scene setting (cached by setting text)
-        setting = s["description"] or "a sunny park meadow"
+        # background plate from Claude's scenery-ONLY setting (never the character
+        # action — a scene "animals dancing" must not bake animals into the plate).
+        setting = ch.get("setting") or "sunny park meadow"
         plate = plate_dir / f"plate_{_sha(setting)}.png"
         if not plate.is_file():
             yield f"[{idx}/{len(scenes)}] {sid}: generating background plate..."
