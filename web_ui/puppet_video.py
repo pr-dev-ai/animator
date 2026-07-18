@@ -99,9 +99,15 @@ def build_music_video(project: str) -> Generator[str, None, None]:
     if not scenes:
         yield f"ERROR: no scenes for '{project}' — generate the storyboard first"
         return
-    musicmap = json.loads(mm_path.read_text()) if mm_path.is_file() else {"beats": [], "downbeats": [], "words": []}
     if not mm_path.is_file():
-        yield "  (no musicmap — motion will play but not beat-locked; run musicmap.py first)"
+        yield "No music-map yet — analysing the song for beats + lyric timing (a few min)..."
+        try:
+            import musicmap as MM
+            for line in MM.build_musicmap(project):
+                yield f"  {line}"
+        except Exception as exc:  # noqa: BLE001
+            yield f"  (music-map analysis failed: {exc}; motion will play but not beat-locked)"
+    musicmap = json.loads(mm_path.read_text()) if mm_path.is_file() else {"beats": [], "downbeats": [], "words": []}
 
     blender = blender_render.resolve_blender()
     ffmpeg = blender_render.resolve_ffmpeg()

@@ -724,9 +724,11 @@ def animation_build() -> Response | tuple[Response, int]:
         return _err(f"Project '{project}' not found", 404)
 
     try:
-        from web_ui import animation_api  # type: ignore
+        # The Animate button now drives the 2D cutout-PUPPET pipeline (characters
+        # that move/waddle/lip-sync), not the old depth-parallax slideshow.
+        from web_ui import puppet_video as animation_api  # type: ignore
     except Exception:
-        logger.info("animation_api not available yet — returning graceful SSE notice")
+        logger.info("puppet_video not available yet — returning graceful SSE notice")
 
         def _unavailable(_proj: str) -> Generator[str, None, None]:
             yield ("ERROR: The animation module is not available yet. "
