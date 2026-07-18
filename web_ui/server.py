@@ -217,6 +217,17 @@ def config_check() -> Response:
 # ---------------------------------------------------------------------------
 
 
+@app.route("/api/templates", methods=["GET"])
+def list_templates() -> Response | tuple[Response, int]:
+    """Story templates for the Lyrics stage: [{id, label, style}, ...]."""
+    try:
+        from web_ui import claude_api  # lazy import
+        return _ok({"templates": claude_api.list_song_templates()})
+    except Exception as exc:
+        logger.exception("list_templates failed")
+        return _err(str(exc))
+
+
 @app.route("/api/generate/lyrics", methods=["POST"])
 def generate_lyrics() -> Response | tuple[Response, int]:
     try:
@@ -226,6 +237,7 @@ def generate_lyrics() -> Response | tuple[Response, int]:
         theme: str = body.get("theme", "").strip()
         style: str = body.get("style", "").strip()
         language: str = body.get("language", "English").strip() or "English"
+        template: str = body.get("template", "").strip()
         raw_verses = body.get("verses", 3)
 
         # Validate before touching Claude
@@ -238,7 +250,7 @@ def generate_lyrics() -> Response | tuple[Response, int]:
         if not 1 <= verses <= 10:
             return _err("'verses' must be between 1 and 10", 400)
 
-        result = claude_api.generate_lyrics(theme, style, verses, language)
+        result = claude_api.generate_lyrics(theme, style, verses, language, template or None)
         return _ok(result)
     except ValueError as exc:
         return _err(str(exc), 400)

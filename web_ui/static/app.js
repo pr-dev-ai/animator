@@ -432,6 +432,7 @@ async function generateLyrics() {
   const theme = $('lyrics-theme').value.trim();
   const style = $('lyrics-style').value.trim();
   const language = $('lyrics-language').value;
+  const template = $('lyrics-template') ? $('lyrics-template').value : '';
   const verses = parseInt($('lyrics-verses').value, 10) || 3;
   if (!theme) { toast('Enter a theme', 'error'); return; }
   if (!await preflight()) return;
@@ -439,7 +440,7 @@ async function generateLyrics() {
   const btn = $('generate-lyrics-btn');
   busy(btn, true, 'Writing…');
   try {
-    const data = await api('POST', '/api/generate/lyrics', { theme, style, verses, language });
+    const data = await api('POST', '/api/generate/lyrics', { theme, style, verses, language, template });
     const text = data.lyrics_text || '';
     $('lyrics-textarea').value = text;
     $('lyrics-editor-card').hidden = false;
@@ -450,6 +451,29 @@ async function generateLyrics() {
     toast(`Lyrics failed: ${err.message}`, 'error');
   } finally {
     busy(btn, false);
+  }
+}
+
+const TEMPLATE_STYLE = {};
+async function loadTemplates() {
+  const sel = $('lyrics-template');
+  if (!sel) return;
+  try {
+    const data = await api('GET', '/api/templates');
+    (data.templates || []).forEach((t) => {
+      TEMPLATE_STYLE[t.id] = t.style;
+      const opt = document.createElement('option');
+      opt.value = t.id; opt.textContent = t.label;
+      sel.appendChild(opt);
+    });
+  } catch (_) { /* templates are optional — leave the free-form choice only */ }
+}
+
+function applyTemplateStyle() {
+  const st = TEMPLATE_STYLE[$('lyrics-template').value];
+  const styleSel = $('lyrics-style');
+  if (st && styleSel && Array.from(styleSel.options).some((o) => o.value === st)) {
+    styleSel.value = st;                    // pre-fill a matching music style
   }
 }
 
@@ -762,6 +786,7 @@ function wire() {
   $('project-select').addEventListener('change', (e) => { if (e.target.value) selectProject(e.target.value); });
 
   $('generate-lyrics-btn').addEventListener('click', generateLyrics);
+  if ($('lyrics-template')) $('lyrics-template').addEventListener('change', applyTemplateStyle);
   $('save-lyrics-btn').addEventListener('click', () => saveLyrics(false));
   $('lyrics-textarea').addEventListener('blur', () => saveLyrics(true));
   $('lyrics-language').addEventListener('change', () => saveLyrics(true));
@@ -793,6 +818,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   wire();
   renderStepper();
   focusStage('project');
+  loadTemplates();
   await loadProjects();
   checkHealth();
   setInterval(checkHealth, 30000);

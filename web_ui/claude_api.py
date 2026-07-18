@@ -57,7 +57,63 @@ def _get_client() -> Anthropic:
 _ROMAN_SCRIPT_LANGUAGES = {"hindi", "mandarin chinese", "japanese", "arabic", "korean", "thai"}
 
 
-def generate_lyrics(theme: str, style: str, num_verses: int, language: str = "English") -> dict:  # noqa: D417
+# Story templates shape the WHOLE song (structure + a suggested music style), so a
+# single choice changes lyrics -> scenes -> video, not just the theme wording. The
+# UI lists these; generate_lyrics injects the matching structure instruction.
+SONG_TEMPLATES = {
+    "nursery": {
+        "label": "Nursery rhyme",
+        "style": "nursery rhyme",
+        "instruction": ("Write a simple, playful nursery rhyme with an easy, repeating "
+                        "sing-along chorus and short rhyming lines."),
+    },
+    "lullaby": {
+        "label": "Lullaby",
+        "style": "lullaby",
+        "instruction": ("Write a gentle bedtime lullaby: slow and soothing, with soft "
+                        "imagery of the moon, stars, sleep and dreams, and a tender "
+                        "repeating refrain."),
+    },
+    "counting": {
+        "label": "Counting song",
+        "style": "upbeat pop",
+        "instruction": ("Write a counting song that counts in order from one to ten. Each "
+                        "verse introduces the next number with a concrete, picturable "
+                        "example (one sun, two shoes...). Keep a repeating chorus."),
+    },
+    "alphabet": {
+        "label": "Alphabet song",
+        "style": "upbeat pop",
+        "instruction": ("Write an alphabet learning song that moves through letters in "
+                        "order, giving each letter a simple word and image (A is for "
+                        "apple...). Keep it rhythmic and easy to sing along."),
+    },
+    "moral": {
+        "label": "Moral story",
+        "style": "folk",
+        "instruction": ("Write a short story-song with a clear beginning, middle and a "
+                        "kind moral at the end (sharing, honesty, courage). Use the "
+                        "verses to advance the story and a chorus that hints at the "
+                        "lesson."),
+    },
+    "action": {
+        "label": "Action & dance",
+        "style": "upbeat pop",
+        "instruction": ("Write a high-energy action song that calls out simple movements "
+                        "(clap, jump, spin, stomp). Each verse names a new action with an "
+                        "encouraging chorus."),
+    },
+}
+
+
+def list_song_templates() -> list:
+    """Public list of templates for the UI: [{id, label, style}, ...]."""
+    return [{"id": k, "label": v["label"], "style": v["style"]}
+            for k, v in SONG_TEMPLATES.items()]
+
+
+def generate_lyrics(theme: str, style: str, num_verses: int, language: str = "English",
+                    template: str | None = None) -> dict:  # noqa: D417
     """Generate kids song lyrics for the given theme and style.
 
     Args:
@@ -65,6 +121,8 @@ def generate_lyrics(theme: str, style: str, num_verses: int, language: str = "En
         style: Musical style descriptor (e.g. "upbeat", "lullaby").
         num_verses: How many verses the song should have.
         language: Language for the lyrics (e.g. "English", "Hindi").
+        template: Optional story-template id (see SONG_TEMPLATES) that shapes the
+            song's structure; falls back to a plain kids song when absent/unknown.
 
     Returns:
         dict with keys: title (str), lyrics_text (str), verses (list[str]).
@@ -80,6 +138,9 @@ def generate_lyrics(theme: str, style: str, num_verses: int, language: str = "En
 
     language = language.strip() or "English"
     use_roman = language.lower() in _ROMAN_SCRIPT_LANGUAGES
+    tmpl = SONG_TEMPLATES.get((template or "").strip())
+    style = (style or "").strip() or (tmpl["style"] if tmpl else "")
+    template_note = f" {tmpl['instruction']}" if tmpl else ""
 
     client = _get_client()
     system_prompt = (
@@ -93,7 +154,8 @@ def generate_lyrics(theme: str, style: str, num_verses: int, language: str = "En
         else f" Write entirely in {language}."
     )
     user_prompt = (
-        f'Write a kids song about "{theme}" in a {style} style with {num_verses} verses.{script_note} '
+        f'Write a kids song about "{theme}" in a {style} style with {num_verses} verses.'
+        f"{template_note}{script_note} "
         "Return your answer as a JSON object with keys: "
         '"title" (string), "lyrics_text" (full song as one string), '
         '"verses" (array of verse strings, one element per verse). '
