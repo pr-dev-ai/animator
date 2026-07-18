@@ -99,7 +99,7 @@ def _resolve_rig(character: str, culture=None):
         d = OUTPUTS_DIR / "duck_rig"
     else:
         d = bcr.ensure_rig(name, culture=culture)
-    return d, json.loads((d / "rig.json").read_text())
+    return d, json.loads((d / "rig.json").read_text(encoding="utf-8"))
 
 
 def prepare_assets(project: str) -> Generator[str, None, None]:
@@ -196,7 +196,7 @@ def build_music_video(project: str) -> Generator[str, None, None]:
                 yield f"  {line}"
         except Exception as exc:  # noqa: BLE001
             yield f"  (music-map analysis failed: {exc}; motion will play but not beat-locked)"
-    musicmap = json.loads(mm_path.read_text()) if mm_path.is_file() else {"beats": [], "downbeats": [], "words": []}
+    musicmap = json.loads(mm_path.read_text(encoding="utf-8")) if mm_path.is_file() else {"beats": [], "downbeats": [], "words": []}
 
     blender = blender_render.resolve_blender()
     ffmpeg = blender_render.resolve_ffmpeg()
@@ -283,7 +283,7 @@ def build_music_video(project: str) -> Generator[str, None, None]:
         hsh = build_dir / f"{sid}.hash"
         nframes = round(dur * FPS)
 
-        if mp4.is_file() and hsh.is_file() and hsh.read_text().strip() == want:
+        if mp4.is_file() and hsh.is_file() and hsh.read_text(encoding="utf-8").strip() == want:
             yield f"[{idx}/{len(scenes)}] {sid} ({character}, {dur:.1f}s) — cached, skip"
             section_mp4s.append(mp4); continue
 
