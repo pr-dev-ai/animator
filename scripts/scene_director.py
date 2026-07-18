@@ -275,18 +275,27 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
         moff = [m["anchor"][0] - pa[0], m["anchor"][1] - pa[1]]
         mkf = [{"t": 0.0, "pos": moff, "rot": 0, "easing": "ease_in_out"}]
         if words:
+            # precise per-word sync (English, high word confidence)
             for w in words:
                 o, c = rel(w["start"]), rel(w["end"])
                 mkf += [{"t": max(0.0, o - 0.05), "pos": moff, "rot": 0, "easing": "ease_out"},
                         {"t": o, "pos": moff, "rot": 24, "easing": "ease_in_out"},
                         {"t": min(dur, c), "pos": moff, "rot": 0, "easing": "ease_in_out"}]
             lip = f"word-sync ({len(words)} words)"
-        elif sings:
-            for i, b in enumerate(beats):
-                mkf.append({"t": rel(b), "pos": moff, "rot": 12 if i % 2 == 0 else 0, "easing": "ease_in_out"})
-            lip = "beat-only (sings, low word conf)"
         else:
-            lip = "closed (not singing)"
+            # Hindi / low word-confidence: flap the mouth in a singing rhythm during
+            # actual VOCAL activity (word time windows, text ignored), closing in the
+            # instrumental gaps. A music video => the on-screen character lip-syncs,
+            # so this fires regardless of the per-scene `sings` guess.
+            vwin = [(rel(w["start"]), rel(min(w.get("end", w["start"] + 0.35), t1)))
+                    for w in musicmap.get("words", []) if start <= w.get("start", -1) < t1]
+            t = 0.0
+            while t <= dur + 1e-6:
+                singing = (not vwin) or any(a - 0.06 <= t <= b + 0.06 for a, b in vwin)
+                rot = (24 if int(t / 0.18) % 2 == 0 else 4) if singing else 0
+                mkf.append({"t": round(t, 3), "pos": moff, "rot": rot, "easing": "ease_in_out"})
+                t += 0.09
+            lip = f"singing flap ({len(vwin)} vocal windows)"
         mkf.append({"t": round(dur, 3), "pos": moff, "rot": 0})
         layers.append({"name": "mouth", "image": str(rig_dir / m["image"]),
                        "z": m["z"], "parent": mparent, "anchor": list(m["anchor"]), "keyframes": mkf})
