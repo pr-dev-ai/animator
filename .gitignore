@@ -58,3 +58,4 @@ Thumbs.db
 
 # Worktree directories
 .claude/worktrees/
+.venv_musicmap/
