@@ -305,9 +305,13 @@ def build_music_video(project: str) -> Generator[str, None, None]:
         yield f"    {sid} encoded ({nframes} frames)"
 
     out = OUTPUTS_DIR / f"{project}_animated.mp4"
-    yield f"Concatenating {len(section_mp4s)} scenes and muxing the song..."
+    subs = build_dir / "_captions.ass"
+    has_caps = _write_captions_ass(scenes, starts, durs, subs)
+    yield (f"Concatenating {len(section_mp4s)} scenes, "
+           + ("burning lyric captions, " if has_caps else "")
+           + "muxing the song...")
     try:
-        _concat_and_mux(ffmpeg, section_mp4s, song, out, build_dir)
+        _concat_and_mux(ffmpeg, section_mp4s, song, out, build_dir, subs if has_caps else None)
     except Exception as exc:  # noqa: BLE001
         yield f"ERROR: {exc}"; return
     mb = out.stat().st_size / (1024 * 1024)
@@ -315,12 +319,62 @@ def build_music_video(project: str) -> Generator[str, None, None]:
     yield "DONE"
 
 
-def _concat_and_mux(ffmpeg, section_mp4s, song, out_path, work_dir):
+def _ass_time(t: float) -> str:
+    """Seconds -> ASS timestamp H:MM:SS.cc."""
+    t = max(0.0, t)
+    h = int(t // 3600); m = int((t % 3600) // 60)
+    s = t % 60
+    return f"{h}:{m:02d}:{s:05.2f}"
+
+
+def _ass_escape(text: str) -> str:
+    """Make a lyric line safe as ASS event text (one visual line, wrap-friendly)."""
+    text = (text or "").replace("\\", "\\\\").replace("{", "(").replace("}", ")")
+    return " ".join(text.split())          # collapse newlines/whitespace to spaces
+
+
+def _write_captions_ass(scenes, starts, durs, path: Path) -> bool:
+    """Write a 'big centered kids' ASS subtitle track from each scene's lyric line
+    (the shotlist `notes`), timed to that scene's window. Returns False if there is
+    nothing to caption (so the caller skips the burn and its re-encode)."""
+    W, H = CANVAS
+    events = []
+    for s, start, dur in zip(scenes, starts, durs):
+        line = _ass_escape(s.get("notes", ""))
+        if not line:
+            continue
+        events.append(f"Dialogue: 0,{_ass_time(start)},{_ass_time(start + dur)},Kids,,0,0,0,,{line}")
+    if not events:
+        return False
+    # bright yellow fill, thick dark-navy outline + shadow, bold, bottom-centre.
+    # colours are ASS &HAABBGGRR: fill yellow, outline near-black navy.
+    style = ("Style: Kids,Comic Sans MS,58,&H0000F0FF,&H000000FF,&H00201005,&H64000000,"
+             "-1,0,0,0,100,100,0,0,1,5,3,2,80,80,64,1")
+    doc = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: {W}\nPlayResY: {H}\n"
+        "WrapStyle: 0\nScaledBorderAndShadow: yes\n\n"
+        "[V4+ Styles]\n"
+        "Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,"
+        "BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,"
+        "BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\n"
+        f"{style}\n\n"
+        "[Events]\n"
+        "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n"
+        + "\n".join(events) + "\n"
+    )
+    path.write_text(doc, encoding="utf-8")
+    return True
+
+
+def _concat_and_mux(ffmpeg, section_mp4s, song, out_path, work_dir, subs_path=None):
     """Lossless-concat the scene MP4s (same encoder params) and mux the song.
 
     Self-contained (does not depend on animation_api internals): concat demuxer with
     -c copy, then mux the song with -shortest so the video length is authoritative.
-    Intermediates live in work_dir and are cleaned up.
+    If *subs_path* is given, the lyric captions are burned in (this forces a one-time
+    video re-encode; per-scene renders are untouched). Intermediates live in work_dir.
     """
     import subprocess
     listfile = work_dir / "_concat_list.txt"
@@ -333,11 +387,22 @@ def _concat_and_mux(ffmpeg, section_mp4s, song, out_path, work_dir):
                             "-c", "copy", str(concat)], capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(f"concat failed: {r.stderr[-600:]}")
-        r = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-                            "-i", str(concat), "-i", str(song),
-                            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                            "-map", "0:v:0", "-map", "1:a:0", "-shortest",
-                            "-movflags", "+faststart", str(out_path)], capture_output=True, text=True)
+        mux = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+               "-i", str(concat), "-i", str(song)]
+        cwd = None
+        if subs_path and Path(subs_path).is_file():
+            # The libass filter can't take a Windows path (the drive colon is read as
+            # an option separator, even escaped). Run ffmpeg IN the subtitle's folder
+            # and reference it by bare filename — no colon to escape. All other args
+            # stay absolute, so cwd doesn't affect them.
+            cwd = str(Path(subs_path).parent)
+            mux += ["-vf", f"ass={Path(subs_path).name}", "-c:v", "libx264",
+                    "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]
+        else:
+            mux += ["-c:v", "copy"]
+        mux += ["-c:a", "aac", "-b:a", "192k", "-map", "0:v:0", "-map", "1:a:0",
+                "-shortest", "-movflags", "+faststart", str(out_path)]
+        r = subprocess.run(mux, capture_output=True, text=True, cwd=cwd)
         if r.returncode != 0:
             raise RuntimeError(f"mux failed: {r.stderr[-600:]}")
     finally:
