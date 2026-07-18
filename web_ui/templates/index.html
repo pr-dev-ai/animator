@@ -165,15 +165,6 @@
                     aria-label="Editable lyrics"></textarea>
           <p class="hint" id="lyrics-save-note">Edits auto-save when you click away.</p>
 
-          <div class="subcard">
-            <div class="card-h-row">
-              <h3 class="card-h sm">Chords &amp; tempo</h3>
-              <button id="generate-chords-btn" class="btn btn-ghost btn-sm" type="button">
-                🎸 Generate Chords
-              </button>
-            </div>
-            <pre id="chords-pre" class="chords" hidden></pre>
-          </div>
         </div>
       </section>
 
@@ -227,8 +218,6 @@
             <button id="generate-images-btn" class="btn btn-accent" type="button">
               <span aria-hidden="true">🎨</span> Generate All Images
             </button>
-            <a href="http://localhost:8188" target="_blank" rel="noopener noreferrer"
-               class="btn btn-ghost btn-sm">Open ComfyUI ↗</a>
           </div>
           <div id="prompts-list" class="prompts-list" aria-live="polite" hidden></div>
         </div>
@@ -274,22 +263,16 @@
       <section class="stage-panel" data-stage="video" aria-label="Final video">
         <div class="stage-head">
           <h1><span class="stage-emoji">🎞️</span> Final Video</h1>
-          <p class="stage-sub">Mux images and song into the finished music video.</p>
+          <p class="stage-sub">Your finished animated music video.</p>
         </div>
 
         <div class="card">
-          <div class="btn-row">
-            <button id="build-video-btn" class="btn btn-accent" type="button">
-              <span aria-hidden="true">🎬</span> Build Final Video
-            </button>
-          </div>
-
           <div id="final-player" class="player" hidden>
             <div class="player-title" id="final-player-title">▶️ Final music video</div>
             <video id="final-video" controls preload="none"></video>
             <a id="final-download" class="btn btn-ghost btn-sm" download>⬇ Download MP4</a>
           </div>
-          <p id="final-empty" class="empty">No video yet — build it once your storyboard is ready.</p>
+          <p id="final-empty" class="empty">No video yet — run the Animate stage to create it.</p>
         </div>
 
         <div class="card">

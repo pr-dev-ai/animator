@@ -468,33 +468,6 @@ async function saveLyrics(silent) {
   }
 }
 
-async function generateChords() {
-  if (!requireProject()) return;
-  const lyrics = $('lyrics-textarea').value.trim();
-  if (lyrics.length < 20) { toast('Add more lyrics before generating chords', 'error'); return; }
-  if (!await preflight()) return;
-  const btn = $('generate-chords-btn');
-  busy(btn, true, 'Chords…');
-  try {
-    const data = await api('POST', '/api/generate/chords', {
-      lyrics, project: state.project, style: $('lyrics-style').value,
-    });
-    const pre = $('chords-pre');
-    const parts = [];
-    if (data.style) parts.push(`Style:  ${data.style}`);
-    if (data.tempo_bpm) parts.push(`Tempo:  ${data.tempo_bpm} BPM`);
-    if (data.chords?.length) parts.push(`Chords: ${data.chords.join(', ')}`);
-    if (data.chord_chart) parts.push('', data.chord_chart);
-    pre.textContent = parts.join('\n');
-    pre.hidden = false;
-    toast('Chords generated', 'success');
-  } catch (err) {
-    toast(`Chords failed: ${err.message}`, 'error');
-  } finally {
-    busy(btn, false);
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Music stage
 // ---------------------------------------------------------------------------
@@ -743,26 +716,6 @@ function renderSummary() {
   });
 }
 
-function buildVideo() {
-  if (!requireProject()) return;
-  const btn = $('build-video-btn');
-  busy(btn, true, 'Building…');
-  runSSE(
-    `/api/animatic/build?project=${encodeURIComponent(state.project)}`,
-    {
-      stage: 'video',
-      label: `Final video — assembling (${state.project})`,
-      onDone: async () => {
-        busy(btn, false);
-        toast('Final video ready!', 'success');
-        await hydrateStatus();
-        refreshVideoStage();
-      },
-      onError: (line) => { busy(btn, false); toast(line, 'error'); },
-    },
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
@@ -816,14 +769,12 @@ function wire() {
     navigator.clipboard.writeText($('lyrics-textarea').value)
       .then(() => toast('Lyrics copied', 'success')).catch(() => toast('Copy failed', 'error'));
   });
-  $('generate-chords-btn').addEventListener('click', generateChords);
 
   $('generate-song-btn').addEventListener('click', generateSong);
   $('generate-prompts-btn').addEventListener('click', generatePrompts);
   $('generate-images-btn').addEventListener('click', generateImages);
   $('refresh-gallery-btn').addEventListener('click', loadGallery);
   $('build-animation-btn').addEventListener('click', buildAnimation);
-  $('build-video-btn').addEventListener('click', buildVideo);
 
   $('final-video-btn').addEventListener('click', () => focusStage('video'));
   $('mb-video-btn').addEventListener('click', () => focusStage('video'));
