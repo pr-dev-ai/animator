@@ -27,6 +27,10 @@ _HUMAN_WORDS = {
     "father", "dad", "grandmother", "grandma", "grandpa", "grandfather",
     "grandparent", "man", "woman", "person", "family", "parent", "sister",
     "brother", "lady", "guy",
+    # common human roles a storyboard cast uses (else they'd build as animals)
+    "teacher", "farmer", "friend", "villager", "doctor", "nurse", "neighbour",
+    "neighbor", "shopkeeper", "uncle", "aunt", "king", "queen", "prince",
+    "princess", "student", "worker", "people",
 }
 
 

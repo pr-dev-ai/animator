@@ -557,9 +557,11 @@ def plan_scenes(
         "number. Walk through the song in order, one scene per lyric line or "
         "couplet.\n\n"
         "Return a JSON OBJECT with keys:\n"
-        '  "protagonist": {"name": short character name (reused verbatim in scenes), '
-        '"description": one line}\n'
-        '  "supporting": array of {"name","description"} for other characters\n'
+        '  "protagonist": {"name": a short DESCRIPTIVE character label reused verbatim '
+        'in every scene — e.g. "village girl", "little boy", "grandmother" — NOT a '
+        'proper name like "Priya", "description": one line}\n'
+        '  "supporting": array of {"name","description"} (names also descriptive labels '
+        'like "mother", "friend", "puppy")\n'
         '  "scenes": array where each element has keys:\n'
         '     "description" (what is visually happening in the scene),\n'
         '     "character" (the ONE character in this scene — the protagonist by '
