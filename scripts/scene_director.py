@@ -64,7 +64,9 @@ def _fx_kind(choreo):
 
 
 _FESTIVE_WORDS = ("festival", "playground", "garden", "celebration", "fair", "wedding", "flower")
-FX_ENABLED = True
+# Overlay clouds/birds read as fake pasted-on shapes. Off — background MOTION now
+# comes from panning the real plate (its own painted sky/trees move naturally).
+FX_ENABLED = False
 
 
 def fx_layers(choreo, dur, W=CANVAS[0], H=CANVAS[1]):

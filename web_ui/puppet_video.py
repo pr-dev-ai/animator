@@ -30,8 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 FPS = 24
 CANVAS = (1152, 768)
-GROUND_FRAC = 0.88        # character feet sit here (fraction of canvas height)
-CHAR_HEIGHT_FRAC = 0.60   # character height as a fraction of canvas height
+GROUND_FRAC = 0.90        # character feet sit here (fraction of canvas height)
+CHAR_HEIGHT_FRAC = 0.55   # character height as a fraction of canvas height (leaves
+                          # margin so an out-swung arm/leg doesn't clip the frame)
 CHAR_X_FRAC = 0.42        # horizontal placement of the character
 
 

@@ -55,32 +55,55 @@ def _gender(name: str):
     return None
 
 
+_ELDERLY_WORDS = ("grandmother", "grandma", "grandfather", "grandpa", "grandparent",
+                  "nani", "dadi", "dada", "elderly", "old ")
+_ADULT_WORDS = ("mother", "father", "mom", "dad", "mum", "mummy", "teacher", "farmer",
+                "man", "woman", "uncle", "aunt", "doctor", "nurse", "lady", "parent",
+                "villager", "shopkeeper", "worker", "king", "queen")
+
+
+def _age(name: str):
+    """'elderly' / 'adult' / 'child' — so grandmothers look old and parents look
+    grown-up, instead of every role rendering as the same cute kid."""
+    n = (name or "").lower()
+    if any(w in n for w in _ELDERLY_WORDS):
+        return "elderly"
+    if any(w in n for w in _ADULT_WORDS):
+        return "adult"
+    return "child"
+
+
 def _prompt(name, culture=None):
     if _is_human(name):
-        # culture is set per-project (e.g. "Indian" for Hindi songs). We add the
-        # cultural cue + traditional clothing but do NOT force a skin tone — Indians
-        # (and everyone) span a wide range, so let SD vary it naturally. Without a
-        # culture, stay neutral (no ethnicity forced) and just avoid the anime default.
+        # culture (e.g. "Indian") adds traditional clothing but never a forced skin
+        # tone. age + gender make the cast DISTINCT: a grandmother reads as elderly,
+        # a father as a grown man, a girl as a cute child — not all the same kid.
         who = f"{culture} {name}" if culture else name
-        gender = _gender(name)
-        # Clothing carries a strong gender signal: 'traditional Indian clothes'
-        # alone renders female (a lehenga/saree), which is why 'big brother' used to
-        # come out a girl. Pick attire by gender so boys read as boys.
+        gender, age = _gender(name), _age(name)
+        hair = "grey hair, " if age == "elderly" else "black hair, "
         if culture == "Indian":
             if gender == "male":
-                details = "black hair, wearing a colourful kurta pajama, "
+                attire = "wearing a kurta pajama, "
             elif gender == "female":
-                details = "black hair, wearing a colourful traditional Indian lehenga dress, "
+                attire = ("wearing a saree, " if age != "child"
+                          else "wearing a colourful traditional Indian dress, ")
             else:
-                details = "black hair, wearing colourful traditional Indian clothes, "
+                attire = "wearing traditional Indian clothes, "
         else:
-            details = ""
+            attire, hair = "", ("grey hair, " if age == "elderly" else "")
+        if age == "elderly":
+            subject = (f"a kind elderly old cartoon {who}, {hair}gentle wrinkled smiling "
+                       f"face, spectacles, {attire}")
+        elif age == "adult":
+            male_extra = "with a small moustache, " if gender == "male" else ""
+            subject = (f"a friendly grown-up adult cartoon {who}, tall, {hair}{male_extra}{attire}")
+        else:
+            subject = f"a cute little cartoon {who}, {hair}{attire}big friendly eyes, "
         return (
-            "cartoon, flat color, children's storybook illustration, 2d, bold clean outlines, "
-            f"simple shapes, cute, ONE single solo cartoon {who}, {details}"
-            "big friendly eyes, alone, a single pose, full body, standing, facing forward, "
-            "a distinct visible mouth, happy, plain solid white background, "
-            "no scenery, centered"
+            "cartoon, flat color, children's storybook illustration, 2d, bold clean "
+            f"outlines, simple shapes, ONE single solo {subject}alone, a single pose, "
+            "full body, standing, facing forward, a distinct visible mouth, happy, "
+            "plain solid white background, no scenery, centered"
         )
     return (
         "cartoon, flat color, children's illustration, 2d, bold clean outlines, simple shapes, cute, "
@@ -239,8 +262,9 @@ def cut(name, candidate, out=None):
     out.mkdir(parents=True, exist_ok=True)
     img = Image.open(candidate).convert("RGB")
     W, H = img.size
-    # crop out any left-edge UI junk the checkpoint sometimes adds
-    img = img.crop((int(W * 0.30), 0, W, H))
+    # NB: no left-crop — that was for the old checkpoint's UI junk and was slicing
+    # off the character's left arm. flat2D's stray decorations are handled by
+    # _largest_component instead.
     cw, ch = img.size
 
     cut_rgba = remove(img, session=new_session("isnet-anime"))
@@ -327,8 +351,6 @@ def _score_candidate(path) -> float:
     from rembg import remove, new_session
     from scipy import ndimage
     img = Image.open(path).convert("RGB")
-    W, H = img.size
-    img = img.crop((int(W * 0.30), 0, W, H))
     alpha = np.asarray(remove(img, session=new_session("isnet-anime")))[:, :, 3]
     solid = alpha > 40
     if not solid.any():
