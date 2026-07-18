@@ -57,6 +57,11 @@ def _fx_kind(choreo):
     return "indoor"
 
 
+# Soft cloud/sparkle sprites clash with the flat-cartoon art pass, so they're off
+# for now; re-enable (with cartoon-styled FX) once the flat-art look is settled.
+FX_ENABLED = False
+
+
 def fx_layers(choreo, dur, W=CANVAS[0], H=CANVAS[1]):
     """Animated overlay layers that make the WORLD move (not just the character).
 
@@ -65,6 +70,8 @@ def fx_layers(choreo, dur, W=CANVAS[0], H=CANVAS[1]):
     All sprites are procedural + cached (scripts/gen_fx). Returns [] on failure so a
     missing FX asset never breaks a render.
     """
+    if not FX_ENABLED:
+        return []
     try:
         import gen_fx
     except Exception:  # noqa: BLE001

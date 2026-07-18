@@ -218,6 +218,9 @@ def cut(name, candidate, out=None):
     cw, ch = img.size
 
     cut_rgba = remove(img, session=new_session("isnet-anime"))
+    # flatten to flat-cartoon art (bold silhouette outline + cel-lines + flat colour)
+    from cartoonify import cartoonify
+    cut_rgba = cartoonify(cut_rgba, colors=12, silhouette=True, edges=True)
     cut_rgba.save(out / "body.png")
     alpha = np.asarray(cut_rgba)[:, :, 3]
     ys, xs = np.where(alpha > 30)
