@@ -414,7 +414,8 @@ def _fallback_scene_list(lyrics_text: str, song_duration: float | None) -> list[
     return scenes
 
 
-def _normalize_scenes(raw_scenes: list, song_duration: float | None) -> list[dict]:
+def _normalize_scenes(raw_scenes: list, song_duration: float | None,
+                      protagonist: str = "") -> list[dict]:
     """Clean Claude's scene list: sequential ids, valid cameras/durations, scaled.
 
     - Assigns clean sequential shot_ids (SH010, SH020, …) regardless of what
@@ -422,6 +423,8 @@ def _normalize_scenes(raw_scenes: list, song_duration: float | None) -> list[dic
     - Clamps the count to [_MIN_SCENES, _MAX_SCENES].
     - When song_duration is given, rescales durations proportionally so they sum
       to approximately song_duration (the scenes then cover the whole song).
+    - Threads each scene's ``character`` (defaulting empty character scenes to the
+      protagonist so the lead carries the video) and its lyric-matched ``setting``.
     """
     scenes: list[dict] = []
     for item in raw_scenes:
@@ -431,12 +434,15 @@ def _normalize_scenes(raw_scenes: list, song_duration: float | None) -> list[dic
         lyric_ref = str(item.get("lyric_ref", "")).strip()
         if not desc and not lyric_ref:
             continue
+        character = str(item.get("character", "")).strip()
         scenes.append(
             {
                 "description": desc or lyric_ref,
                 "camera": _coerce_camera(item.get("camera")),
                 "duration": _coerce_duration(item.get("duration")),
                 "lyric_ref": lyric_ref,
+                "character": character,
+                "setting": str(item.get("setting", "")).strip()[:80],
             }
         )
 
@@ -455,6 +461,12 @@ def _normalize_scenes(raw_scenes: list, song_duration: float | None) -> list[dic
     for i, s in enumerate(scenes):
         s["shot_id"] = f"SH{(i + 1) * 10:03d}"
 
+    # Normalise obvious "no character" markers to empty; trust Claude's assignment
+    # otherwise (it puts the protagonist in most scenes, supporting where featured).
+    for s in scenes:
+        if s["character"].lower() in ("none", "scenery", "n/a", "-"):
+            s["character"] = ""
+
     # Keep a stable key order for the returned dicts.
     return [
         {
@@ -463,6 +475,8 @@ def _normalize_scenes(raw_scenes: list, song_duration: float | None) -> list[dic
             "camera": s["camera"],
             "duration": s["duration"],
             "lyric_ref": s["lyric_ref"],
+            "character": s["character"],
+            "setting": s["setting"],
         }
         for s in scenes
     ]
@@ -512,7 +526,18 @@ def plan_scenes(
         "structure — its verses, chorus, and lines. A short song needs only a few "
         "scenes; a long one needs more. Aim for roughly one scene per lyric line or "
         "couplet, but use your judgement so each scene shows one clear visual moment. "
-        "Every scene must be safe and age-appropriate for kids aged 3-8."
+        "Every scene must be safe and age-appropriate for kids aged 3-8.\n\n"
+        "CAST CONSISTENCY (important): first decide ONE main character — the "
+        "protagonist/hero who carries the WHOLE video from the first scene to the "
+        "last — based on who the song is about. Give them a short, fixed description "
+        "and reuse the EXACT SAME character name in every scene they appear in. The "
+        "protagonist appears in MOST scenes. Add a few supporting characters (family, "
+        "friends, animals the lyrics mention) and use them ONLY in the scenes where "
+        "the lyrics feature them. Never invent a brand-new character for a scene that "
+        "the protagonist could carry.\n\n"
+        "SETTING MATCHES THE LYRICS: each scene's setting must be the place the lyric "
+        "at that moment describes (a village lane, a school, a field, a home) — not "
+        "generic scenery — and a place the scene's character would believably be."
     )
 
     duration_note = (
@@ -531,20 +556,28 @@ def plan_scenes(
         "Decide how many scenes best fit these lyrics — do NOT pad to a fixed "
         "number. Walk through the song in order, one scene per lyric line or "
         "couplet.\n\n"
-        "Return a JSON array where each element has keys:\n"
-        '  "description" (string: what is visually happening in the scene),\n'
-        '  "camera" (string: exactly one of "Wide", "Medium", "Close"),\n'
-        '  "duration" (number: seconds of screen time for this scene),\n'
-        '  "lyric_ref" (string: the exact lyric line or phrase this scene '
-        "illustrates).\n\n"
-        "Output only the JSON array with no additional text.\n\n"
+        "Return a JSON OBJECT with keys:\n"
+        '  "protagonist": {"name": short character name (reused verbatim in scenes), '
+        '"description": one line}\n'
+        '  "supporting": array of {"name","description"} for other characters\n'
+        '  "scenes": array where each element has keys:\n'
+        '     "description" (what is visually happening in the scene),\n'
+        '     "character" (the ONE character in this scene — the protagonist by '
+        "default, or a supporting character's name when the lyric features them; use "
+        'the EXACT name from the cast, or "" for a pure scenery/title moment),\n'
+        '     "setting" (2-6 words for the location, matching THIS lyric line),\n'
+        '     "camera" (exactly one of "Wide", "Medium", "Close"),\n'
+        '     "duration" (number: seconds of screen time),\n'
+        '     "lyric_ref" (the exact lyric line this scene illustrates).\n\n'
+        "The protagonist's name must be identical everywhere they appear so the same "
+        "character is drawn throughout. Output only the JSON object.\n\n"
         f"Lyrics:\n{lyrics_text}"
     )
 
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=4096,
+            max_tokens=8000,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
@@ -557,13 +590,21 @@ def plan_scenes(
 
     try:
         parsed = json.loads(_strip_fences(raw_text))
-        if not isinstance(parsed, list):
-            raise json.JSONDecodeError("expected a JSON array", raw_text, 0)
     except json.JSONDecodeError:
         logger.warning("plan_scenes: could not parse JSON; using fallback")
         return _fallback_scene_list(lyrics_text, song_duration)
+    # new cast-aware object form {protagonist, supporting, scenes}; fall back to a
+    # bare array for older/degraded responses.
+    if isinstance(parsed, dict):
+        raw_list = parsed.get("scenes", [])
+        proto = (parsed.get("protagonist") or {}).get("name", "") if isinstance(parsed.get("protagonist"), dict) else ""
+    elif isinstance(parsed, list):
+        raw_list, proto = parsed, ""
+    else:
+        logger.warning("plan_scenes: unexpected JSON shape; using fallback")
+        return _fallback_scene_list(lyrics_text, song_duration)
 
-    scenes = _normalize_scenes(parsed, song_duration)
+    scenes = _normalize_scenes(raw_list, song_duration, protagonist=proto)
     if not scenes:
         logger.warning("plan_scenes: normalized scene list too small; using fallback")
         return _fallback_scene_list(lyrics_text, song_duration)
@@ -861,23 +902,31 @@ def direct_scenes(shots: list[dict]) -> dict:
     try:
         check_api_key()
         client = _get_client()
+        # A cast-consistent shotlist already pins character + setting per scene; keep
+        # them so the protagonist stays the same throughout and backgrounds match the
+        # lyric. Only older shotlists leave these blank for Claude to derive.
+        pre = {str(s.get("shot_id", "")): s for s in usable}
+        has_cast = any(str(s.get("character", "")).strip() for s in usable)
         lines = [{"shot_id": str(s.get("shot_id", "")),
                   "duration": round(_coerce_duration(s.get("duration"), 4.0), 1),
-                  "description": str(s.get("prompt", s.get("description", ""))).strip()[:400]}
+                  "description": str(s.get("prompt", s.get("description", ""))).strip()[:400],
+                  "character": str(s.get("character", "")).strip(),
+                  "setting": str(s.get("setting", "")).strip()}
                  for s in usable]
+        cast_note = (
+            "Each scene ALREADY has an assigned character and setting (keep the same "
+            "character across scenes for consistency) — do NOT change them; only "
+            "decide the animation.\n" if has_cast else "")
         user_prompt = (
             "You are the animation director for a children's music video. For each "
-            "scene below, decide how its main character should be animated. Return an "
-            "object per scene with keys:\n"
+            "scene below, decide how its main character should be animated. "
+            f"{cast_note}Return an object per scene with keys:\n"
             '  "shot_id" (echo the id),\n'
-            '  "character" (the ONE main character to animate in this scene — an '
-            'animal OR a person, e.g. "duck", "bunny", "squirrel", "child", '
-            '"mother", "grandmother", "little boy", "baby"; pick the single most '
-            'important one if several appear; use "" ONLY for a true title card or '
-            'an abstract scene with no character at all),\n'
-            '  "setting" (2-5 words describing ONLY the scenery/location for the '
-            'background, with NO animals or characters, e.g. "sunny park meadow", '
-            '"pond with lily pads", "grassy hill with trees"),\n'
+            '  "character" (echo the scene\'s assigned character if given; otherwise '
+            'the ONE main character to animate — an animal OR a person; use "" only '
+            "for a true scenery/title moment),\n"
+            '  "setting" (echo the scene\'s assigned setting if given; otherwise 2-5 '
+            'words for the location, NO animals or characters),\n'
             '  "sings" (boolean: is this character singing/vocalising here? drives lip-sync),\n'
             f'  "body_motion" (one of {", ".join(_BODY_MOTIONS)}),\n'
             f'  "camera" (one of {", ".join(_CAMERAS)}),\n'
@@ -902,9 +951,16 @@ def direct_scenes(shots: list[dict]) -> dict:
         for item in parsed:
             sid = str(item.get("shot_id", ""))
             if sid in result:
+                ps = pre.get(sid, {})
+                if has_cast:      # pinned by the storyboard — enforce, don't re-derive
+                    character = str(ps.get("character", "")).strip()
+                    setting = str(ps.get("setting", "")).strip() or str(item.get("setting", "")).strip()
+                else:
+                    character = str(item.get("character", "")).strip()
+                    setting = str(item.get("setting", "")).strip()
                 result[sid] = {
-                    "character": str(item.get("character", "")).strip(),
-                    "setting": str(item.get("setting", "")).strip()[:80],
+                    "character": character,
+                    "setting": setting[:80],
                     "sings": bool(item.get("sings", True)),
                     "body_motion": item.get("body_motion") if item.get("body_motion") in _BODY_MOTIONS else "bob",
                     "camera": item.get("camera") if item.get("camera") in _CAMERAS else "push_in",

@@ -534,7 +534,10 @@ def save_planned_shotlist(project: str, scenes: list[dict]) -> None:
     tmp = shotlist_csv.with_suffix(".csv.tmp")
     with open(tmp, "w", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["shot_id", "description", "camera", "duration", "notes"])
+        # character + setting carry the cast-consistent protagonist and the
+        # lyric-matched location through to the storyboard/render.
+        writer.writerow(["shot_id", "description", "camera", "duration", "notes",
+                         "character", "setting"])
         for scene in scenes:
             writer.writerow(
                 [
@@ -543,6 +546,8 @@ def save_planned_shotlist(project: str, scenes: list[dict]) -> None:
                     scene.get("camera", "Medium"),
                     scene.get("duration", ""),
                     scene.get("lyric_ref", ""),
+                    scene.get("character", ""),
+                    scene.get("setting", ""),
                 ]
             )
     tmp.replace(shotlist_csv)

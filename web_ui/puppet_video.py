@@ -71,7 +71,11 @@ def _read_scenes(project: str):
                                   "description": (r.get("description") or "").strip(),
                                   "camera": (r.get("camera") or "Medium").strip(),
                                   "duration": r.get("duration") or "4.0",
-                                  "notes": (r.get("notes") or "").strip()})
+                                  "notes": (r.get("notes") or "").strip(),
+                                  # cast-consistent character + lyric-matched setting
+                                  # (blank on older shotlists -> direct_scenes derives)
+                                  "character": (r.get("character") or "").strip(),
+                                  "setting": (r.get("setting") or "").strip()})
     return shots
 
 
