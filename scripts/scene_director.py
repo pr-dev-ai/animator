@@ -48,27 +48,32 @@ _STAR_POS = [(0.12, 0.16), (0.30, 0.11), (0.50, 0.19), (0.68, 0.13), (0.83, 0.24
              (0.21, 0.32), (0.58, 0.33), (0.90, 0.38)]
 
 
+_INDOOR_WORDS = ("classroom", "class room", "kitchen", "bedroom", "indoor", "inside",
+                 "interior", "living room", "hall", "shop", "office", "temple inside")
+
+
 def _fx_kind(choreo):
     text = f"{choreo.get('setting', '')} {choreo.get('mood', '')}".lower()
     if any(w in text for w in _NIGHT_WORDS):
         return "night"
+    if any(w in text for w in _INDOOR_WORDS):   # indoor wins (e.g. 'village classroom')
+        return "indoor"
     if any(w in text for w in _OUTDOOR_WORDS):
         return "outdoor"
     return "indoor"
 
 
-# Soft cloud/sparkle sprites clash with the flat-cartoon art pass, so they're off
-# for now; re-enable (with cartoon-styled FX) once the flat-art look is settled.
-FX_ENABLED = False
+_FESTIVE_WORDS = ("festival", "playground", "garden", "celebration", "fair", "wedding", "flower")
+FX_ENABLED = True
 
 
 def fx_layers(choreo, dur, W=CANVAS[0], H=CANVAS[1]):
-    """Animated overlay layers that make the WORLD move (not just the character).
+    """Flat-cartoon overlay layers that put MOTION in the world, matched to the art.
 
-    Chosen by scene kind: outdoor -> drifting clouds; night -> twinkling stars +
-    floating sparkles; indoor/unknown -> gentle floating sparkles (dreamy motes).
-    All sprites are procedural + cached (scripts/gen_fx). Returns [] on failure so a
-    missing FX asset never breaks a render.
+    outdoor -> flat outlined clouds drift + a bird or two flies across; night ->
+    twinkling stars; festive/garden -> drifting petals. All sprites are flat-styled
+    (scripts/gen_fx) so they sit in the flat-cartoon look. Returns [] on failure so a
+    missing asset never breaks a render.
     """
     if not FX_ENABLED:
         return []
@@ -76,6 +81,7 @@ def fx_layers(choreo, dur, W=CANVAS[0], H=CANVAS[1]):
         import gen_fx
     except Exception:  # noqa: BLE001
         return []
+    text = f"{choreo.get('setting', '')} {choreo.get('mood', '')}".lower()
     kind = _fx_kind(choreo)
     layers = []
 
@@ -86,17 +92,7 @@ def fx_layers(choreo, dur, W=CANVAS[0], H=CANVAS[1]):
         kf.append(fn(dur))
         return kf
 
-    if kind == "outdoor":
-        cloud = str(gen_fx.ensure_fx("cloud"))
-        for i, (rx, ry, drift, sc) in enumerate([(0.22, 0.18, 90, 1.0), (0.62, 0.28, 60, 0.8)]):
-            x0, y0 = rx * W, ry * H
-            layers.append({"name": f"fx_cloud{i}", "image": cloud, "z": 1, "anchor": [240, 130],
-                           "keyframes": sample(lambda t, x0=x0, y0=y0, drift=drift, sc=sc: {
-                               "t": round(t, 3),
-                               "pos": [int(x0 + drift * (t / max(0.1, dur))),
-                                       int(y0 + 6 * math.sin(2 * math.pi * t / 6.0))],
-                               "scale": sc, "easing": "linear"}, step=0.5)})
-    elif kind == "night":
+    if kind == "night":
         star = str(gen_fx.ensure_fx("star"))
         for i, (rx, ry) in enumerate(_STAR_POS):
             x0, y0, ph = int(rx * W), int(ry * H), i * 0.8
@@ -105,9 +101,38 @@ def fx_layers(choreo, dur, W=CANVAS[0], H=CANVAS[1]):
                                "t": round(t, 3), "pos": [x0, y0],
                                "scale": round(0.5 + 0.6 * (0.5 + 0.5 * math.sin(2 * math.pi * t / 1.5 + ph)), 3),
                                "easing": "ease_in_out"})})
-        _add_sparkles(layers, gen_fx, dur, W, H, sample, count=3)
-    else:
-        _add_sparkles(layers, gen_fx, dur, W, H, sample, count=4)
+    elif kind == "outdoor":
+        cloud = str(gen_fx.ensure_fx("flatcloud"))
+        for i, (rx, ry, drift, sc) in enumerate([(0.20, 0.16, 70, 1.0), (0.60, 0.26, 48, 0.78)]):
+            x0, y0 = rx * W, ry * H
+            layers.append({"name": f"fx_cloud{i}", "image": cloud, "z": 1, "anchor": [220, 110],
+                           "keyframes": sample(lambda t, x0=x0, y0=y0, drift=drift, sc=sc: {
+                               "t": round(t, 3),
+                               "pos": [int(x0 + drift * (t / max(0.1, dur))),
+                                       int(y0 + 5 * math.sin(2 * math.pi * t / 6.0))],
+                               "scale": sc, "easing": "linear"}, step=0.5)})
+        bird = str(gen_fx.ensure_fx("bird"))            # 2 birds glide across the sky
+        for i, (ry, dir_, sc) in enumerate([(0.14, 1, 1.0), (0.22, -1, 0.75)]):
+            y0 = ry * H
+            layers.append({"name": f"fx_bird{i}", "image": bird, "z": 1, "anchor": [36, 19],
+                           "keyframes": sample(lambda t, y0=y0, dir_=dir_, sc=sc: {
+                               "t": round(t, 3),
+                               "pos": [int((0.5 - dir_ * 0.65) * W + dir_ * 1.3 * W * (t / max(0.1, dur))),
+                                       int(y0 + 10 * math.sin(2 * math.pi * t / 2.5))],
+                               "scale": sc, "easing": "linear"}, step=0.4)})
+
+    if any(w in text for w in _FESTIVE_WORDS):          # drifting petals
+        petal = str(gen_fx.ensure_fx("petal"))
+        for i in range(5):
+            rx = _SPARKLE_POS[i % len(_SPARKLE_POS)][0]
+            x0, ph = rx * W, i * 1.3
+            layers.append({"name": f"fx_petal{i}", "image": petal, "z": 6, "anchor": [13, 13],
+                           "keyframes": sample(lambda t, x0=x0, ph=ph: {
+                               "t": round(t, 3),
+                               "pos": [int(x0 + 40 * math.sin(2 * math.pi * t / 3.0 + ph)),
+                                       int((-0.1 + 1.1 * (t / max(0.1, dur))) * H)],
+                               "scale": round(0.8 + 0.2 * math.sin(2 * math.pi * t + ph), 3),
+                               "rot": round(60 * math.sin(t + ph), 1), "easing": "linear"})})
     return layers
 
 
@@ -209,7 +234,7 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
 
     layers = [
         {"name": "bg", "image": str(bg_image), "z": 0, "anchor": [576, 384],
-         "keyframes": _camera_bg(choreo, dur)},
+         "keyframes": _camera_bg(choreo, dur, direction)},
         *shadow_layer,
         {"name": "body", "image": str(rig_dir / parts["body"]["image"]),
          "z": parts["body"]["z"], "anchor": list(parts["body"]["anchor"]), "keyframes": body_kf},
@@ -263,11 +288,17 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
     return spec
 
 
-def _camera_bg(choreo, dur):
+def _camera_bg(choreo, dur, direction=1):
+    """Background keyframes that give the scene continuous motion instead of a frozen
+    flat image: the plate is scaled up (so it can pan without revealing edges) and
+    slowly drifts sideways + pushes in. The character stays at its canvas position,
+    so the drift also reads as a gentle parallax between figure and world."""
     z0, z1, _ = _CAMERA.get(choreo.get("camera", "push_in"), _CAMERA["push_in"])
-    # background gets a touch less push than the camera for a parallax cue
-    return [{"t": 0.0, "pos": [576, 384], "scale": 1.0, "easing": "ease_in_out"},
-            {"t": round(dur, 3), "pos": [576, 384], "scale": round(1.0 + (z1 - z0) * 0.4, 3)}]
+    base = 1.18                                    # overscan so a pan stays in-bounds
+    s1 = round(base + max(0.0, z1 - z0) * 0.5, 3)
+    dx = direction * 30                            # slow horizontal scene drift (px)
+    return [{"t": 0.0, "pos": [576 - dx, 384], "scale": base, "easing": "ease_in_out"},
+            {"t": round(dur, 3), "pos": [576 + dx, 384], "scale": s1}]
 
 
 def _camera_move(choreo, dur):

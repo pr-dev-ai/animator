@@ -54,6 +54,43 @@ def _star(s=40):
     return img.filter(ImageFilter.GaussianBlur(0.8))
 
 
+def _flat_cloud(w=440, h=220):
+    """Flat cartoon cloud: white fill with a bold dark rim (matches the flat art)."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    lobes = [(0.30, 0.50, 0.17), (0.45, 0.42, 0.20), (0.60, 0.48, 0.18),
+             (0.50, 0.56, 0.21), (0.38, 0.57, 0.16), (0.70, 0.55, 0.14)]
+    for cx, cy, r in lobes:                       # dark outline pass (larger)
+        x, y, rr = cx * w, cy * h, r * min(w, h) + 6
+        d.ellipse((x - rr, y - rr, x + rr, y + rr), fill=(70, 80, 100, 255))
+    for cx, cy, r in lobes:                       # white fill pass (smaller)
+        x, y, rr = cx * w, cy * h, r * min(w, h)
+        d.ellipse((x - rr, y - rr, x + rr, y + rr), fill=(250, 252, 255, 255))
+    return img
+
+
+def _bird(w=72, h=38):
+    """A tiny flat gull silhouette (a distant bird), for the sky."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    col = (45, 50, 65, 255)
+    d.line([(3, h * 0.7), (w * 0.28, h * 0.22), (w * 0.5, h * 0.62)], fill=col, width=5, joint="curve")
+    d.line([(w * 0.5, h * 0.62), (w * 0.72, h * 0.22), (w - 3, h * 0.7)], fill=col, width=5, joint="curve")
+    return img
+
+
+def _petal(s=26):
+    """A small flat pink petal for festival/garden drift."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.ellipse((s * 0.22, s * 0.05, s * 0.78, s * 0.95), fill=(232, 96, 128, 255))
+    d.ellipse((s * 0.22, s * 0.05, s * 0.78, s * 0.95), outline=(150, 40, 70, 255), width=2)
+    return img
+
+
 def _shadow(w=340, h=110):
     from PIL import Image, ImageDraw, ImageFilter
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
@@ -62,7 +99,8 @@ def _shadow(w=340, h=110):
     return img.filter(ImageFilter.GaussianBlur(14))
 
 
-_MAKERS = {"cloud": _soft_cloud, "sparkle": _sparkle, "star": _star, "shadow": _shadow}
+_MAKERS = {"cloud": _soft_cloud, "sparkle": _sparkle, "star": _star, "shadow": _shadow,
+           "flatcloud": _flat_cloud, "bird": _bird, "petal": _petal}
 
 
 def ensure_fx(name: str) -> Path:
