@@ -482,6 +482,11 @@ def _normalize_scenes(raw_scenes: list, song_duration: float | None,
     ]
 
 
+# Storyboard planning uses a stronger model than the fast per-scene calls: it sets
+# up the whole video's cast + narrative, so quality here pays off across every scene.
+_PLANNER_MODEL = "claude-sonnet-5"
+
+
 def plan_scenes(
     lyrics_text: str,
     style: str,
@@ -577,9 +582,13 @@ def plan_scenes(
     )
 
     try:
+        # The storyboard is the creative backbone (protagonist arc, cast placement,
+        # lyric->scene->setting matching), so plan it with a strong model + extended
+        # thinking + generous output, rather than the fast Haiku used elsewhere.
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=8000,
+            model=_PLANNER_MODEL,
+            max_tokens=16000,
+            thinking={"type": "adaptive"},   # model reasons as needed before answering
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
