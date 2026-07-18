@@ -778,8 +778,11 @@ def direct_scenes(shots: list[dict]) -> dict:
             "scene below, decide how its main character should be animated. Return an "
             "object per scene with keys:\n"
             '  "shot_id" (echo the id),\n'
-            '  "character" (the main animal/character, e.g. "duck", "bunny", '
-            '"squirrel"; "" if none/title card),\n'
+            '  "character" (the ONE main character to animate in this scene — an '
+            'animal OR a person, e.g. "duck", "bunny", "squirrel", "child", '
+            '"mother", "grandmother", "little boy", "baby"; pick the single most '
+            'important one if several appear; use "" ONLY for a true title card or '
+            'an abstract scene with no character at all),\n'
             '  "setting" (2-5 words describing ONLY the scenery/location for the '
             'background, with NO animals or characters, e.g. "sunny park meadow", '
             '"pond with lily pads", "grassy hill with trees"),\n'

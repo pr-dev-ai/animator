@@ -22,7 +22,27 @@ COMFY = "http://localhost:8188"
 LIB = Path(r"C:\pradeep\animator\outputs\char_lib")
 
 
+_HUMAN_WORDS = {
+    "child", "kid", "baby", "boy", "girl", "toddler", "mother", "mom", "mum",
+    "father", "dad", "grandmother", "grandma", "grandpa", "grandfather",
+    "grandparent", "man", "woman", "person", "family", "parent", "sister",
+    "brother", "lady", "guy",
+}
+
+
+def _is_human(name: str) -> bool:
+    n = (name or "").lower()
+    return any(w in n for w in _HUMAN_WORDS)
+
+
 def _prompt(name):
+    if _is_human(name):
+        return (
+            "cartoon, flat color, children's storybook illustration, 2d, bold clean outlines, "
+            f"simple shapes, cute, ONE single solo cartoon {name}, alone, a single pose, full body, "
+            "strict side view profile facing left, standing, a distinct visible mouth, happy, "
+            "simple clothes, plain solid white background, no scenery, centered"
+        )
     return (
         "cartoon, flat color, children's illustration, 2d, bold clean outlines, simple shapes, cute, "
         f"a single adorable chubby baby {name}, clear side view profile facing left, round body, "
@@ -31,8 +51,17 @@ def _prompt(name):
     )
 
 
-NEG = ("front view, three-quarter, 3/4 view, back view, human, humanoid, person, arms, hands, "
-       "multiple characters, two animals, scenery, background, realistic, photo, dark, cropped")
+def _neg(name):
+    base = ("front view, three-quarter, 3/4 view, back view, multiple characters, two figures, "
+            "scenery, background, realistic, photo, dark, cropped, extra limbs")
+    if _is_human(name):
+        # humans need arms/hands, but SD loves turnaround sheets — kill those hard
+        return (base + ", character sheet, reference sheet, model sheet, turnaround, "
+                "multiple views, multiple poses, three views, front and back, grid, duplicate")
+    return base + ", human, humanoid, person, arms, hands"
+
+
+NEG = _neg("")  # animal default (back-compat for module-level references)
 
 
 def generate(name):
@@ -42,7 +71,7 @@ def generate(name):
     out = LIB / name
     out.mkdir(parents=True, exist_ok=True)
     for seed in [7, 21, 88, 130, 205, 302]:
-        wf = P._comfyui_workflow(_prompt(name), NEG, f"char_{name}_{seed}", ckpt)
+        wf = P._comfyui_workflow(_prompt(name), _neg(name), f"char_{name}_{seed}", ckpt)
         for node in wf.values():
             if node.get("class_type") == "KSampler":
                 node["inputs"]["seed"] = seed
@@ -130,7 +159,7 @@ def _generate_one(name, seed):
     ckpt = P._find_checkpoint()
     out = LIB / name
     out.mkdir(parents=True, exist_ok=True)
-    wf = P._comfyui_workflow(_prompt(name), NEG, f"char_{name}_{seed}", ckpt)
+    wf = P._comfyui_workflow(_prompt(name), _neg(name), f"char_{name}_{seed}", ckpt)
     for node in wf.values():
         if node.get("class_type") == "KSampler":
             node["inputs"]["seed"] = seed
@@ -152,19 +181,58 @@ def _generate_one(name, seed):
     return None
 
 
-def ensure_rig(name, char_dir=None) -> Path:
-    """Return a ready rig dir for *name*, building it (seed 7) if absent.
+def _score_candidate(path) -> float:
+    """Higher = a cleaner SINGLE figure. Penalises turnarounds/multi-figure (low
+    largest-component share) and extreme/too-wide bounding boxes."""
+    import numpy as np
+    from PIL import Image
+    from rembg import remove, new_session
+    from scipy import ndimage
+    img = Image.open(path).convert("RGB")
+    W, H = img.size
+    img = img.crop((int(W * 0.30), 0, W, H))
+    alpha = np.asarray(remove(img, session=new_session("isnet-anime")))[:, :, 3]
+    solid = alpha > 40
+    if not solid.any():
+        return 0.0
+    lbl, n = ndimage.label(solid)
+    sizes = ndimage.sum(solid, lbl, range(1, n + 1))
+    largest = float(sizes.max()) if n else 0.0
+    single_share = largest / max(1.0, solid.sum())     # 1.0 = one blob (single figure)
+    ys, xs = np.where(solid)
+    bw, bh = xs.max() - xs.min(), ys.max() - ys.min()
+    aspect = bw / max(1, bh)
+    width_pen = max(0.0, aspect - 1.1)                 # penalise very wide (turnaround)
+    return single_share - 0.6 * width_pen
 
-    Idempotent: an existing rig.json is reused, so the orchestrator only pays the
-    generate+cut cost the first time a character appears.
+
+def ensure_rig(name, char_dir=None) -> Path:
+    """Return a ready rig dir for *name*, building it if absent.
+
+    Generates a few candidates and AUTO-PICKS the cleanest single figure (rejects
+    turnaround sheets / multi-figure), then cuts + rigs it. Idempotent: an existing
+    rig.json is reused, so the cost is paid once per character.
     """
     d = Path(char_dir) if char_dir else (LIB / name)
     if (d / "rig.json").is_file():
         return d
-    cand = _generate_one(name, 7)
-    if not cand:
+    seeds = [7, 42, 101, 250] if _is_human(name) else [7, 88, 205]  # humans are pickier
+    best, best_score = None, -1e9
+    for s in seeds:
+        cand = _generate_one(name, s)
+        if not cand:
+            continue
+        try:
+            sc = _score_candidate(cand)
+        except Exception:  # noqa: BLE001
+            sc = 0.0
+        if sc > best_score:
+            best, best_score = cand, sc
+        if best_score >= 0.9:      # a clean single figure — stop early
+            break
+    if not best:
         raise RuntimeError(f"could not generate character '{name}'")
-    cut(name, str(cand))
+    cut(name, str(best))
     return LIB / name
 
 
