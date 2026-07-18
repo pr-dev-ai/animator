@@ -23,14 +23,7 @@ CANVAS = (1152, 768)
 FPS = 24
 WORD_CONF_MIN = 0.65   # English ~0.79 fires lip-sync; Hindi ~0.56 -> beat-only
 
-# Body-motion styles -> (per-beat vertical dip px, waddle tilt deg).
-_BODY_MOTION = {
-    "still": (0, 0),
-    "bob":   (22, 3),
-    "sway":  (8, 6),
-    "hop":   (40, 0),
-    "slide": (10, 2),
-}
+import math
 _CAMERA = {   # (zoom0, zoom1, pan_dx over shot as fraction of width)
     "hold":     (1.04, 1.04, 0.0),
     "push_in":  (1.02, 1.12, 0.0),
@@ -42,6 +35,54 @@ _CAMERA = {   # (zoom0, zoom1, pan_dx over shot as fraction of width)
 
 def _win(times, t0, t1):
     return [t for t in times if t0 <= t < t1]
+
+
+def _body_motion(choreo, beats, dur, pos, scale, intensity):
+    """Rich per-action body motion — the difference between a cartoon and a sticker.
+
+    LOCOMOTION (walk/hop/run/slide, or any non-singing character): the character
+    TRAVELS across the scene with a walk-bounce, waddle rock and squash-and-stretch
+    on each step.  PERFORMANCE (a singing character): stays put but performs —
+    energetic side-sway, on-beat bounce, body squash and a waddle rock, so a singer
+    reads as alive-in-place instead of vibrating.
+    """
+    style = (choreo.get("body_motion") or "bob").lower()
+    sings = bool(choreo.get("sings"))
+    x0, y0 = pos
+    W = CANVAS[0]
+    step = 0.42                                   # waddle/step cadence (s)
+    amp = 0.6 + intensity                         # scale motion by Claude's intensity
+    locomote = style in ("slide", "hop", "run", "walk") or not sings
+
+    kf = []
+    t, i = 0.0, 0
+    while t <= dur + 1e-6:
+        ph = t / step
+        if locomote:
+            # travel across; hop = bigger arc + forward leaps, walk/run = steady glide
+            frac = min(1.0, t / max(0.1, dur))
+            x = int(180 + (W - 360) * (frac if style != "run" else frac))
+            if style == "hop":
+                bounce = -44 * amp * abs(math.sin(math.pi * ph))
+            else:
+                bounce = -22 * amp * abs(math.sin(math.pi * ph))
+            rock = 7 * math.sin(2 * math.pi * (t / (2 * step)))
+        else:
+            # perform in place: sway + on-beat bounce
+            x = int(x0 + 26 * amp * math.sin(2 * math.pi * (t / (2 * step))))
+            bounce = -18 * amp * abs(math.sin(math.pi * ph))
+            rock = 6 * math.sin(2 * math.pi * (t / (2 * step)))
+        down = (i % 2 == 0)
+        sx = round(scale * (1.06 if down else 0.98), 3)
+        sy = round(scale * (0.94 if down else 1.04), 3)
+        kf.append({"t": round(t, 3), "pos": [x, int(y0 + bounce)], "rot": round(rock, 1),
+                   "scale": [sx, sy], "easing": "ease_in_out"})
+        t += step / 2
+        i += 1
+    # settle to rest at the end
+    kf.append({"t": round(dur, 3), "pos": [x0 if not locomote else int(W - 180), y0],
+               "rot": 0, "scale": scale, "easing": "ease_in_out"})
+    return kf
 
 
 def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
@@ -61,18 +102,8 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
 
     ba = rig["body_anchor"]
     parts = rig["parts"]
-    dip, tilt_amp = _BODY_MOTION.get(choreo.get("body_motion", "bob"), _BODY_MOTION["bob"])
     intensity = float(choreo.get("intensity", 0.6))
-    dip = int(dip * (0.5 + intensity))          # scale motion by Claude's intensity
-
-    # --- body: motion on beats ---
-    body_kf = [{"t": 0.0, "pos": list(duck_pos), "rot": 0, "scale": duck_scale, "easing": "ease_in_out"}]
-    for i, b in enumerate(beats):
-        dy = dip if i % 2 == 0 else -int(dip * 0.45)
-        tl = tilt_amp if i % 2 == 0 else -tilt_amp
-        body_kf.append({"t": rel(b), "pos": [duck_pos[0], duck_pos[1] + dy], "rot": tl,
-                        "scale": duck_scale, "easing": "ease_in_out"})
-    body_kf.append({"t": round(dur, 3), "pos": list(duck_pos), "rot": 0, "scale": duck_scale})
+    body_kf = _body_motion(choreo, beats, dur, duck_pos, duck_scale, intensity)
 
     layers = [
         {"name": "bg", "image": str(bg_image), "z": 0, "anchor": [576, 384],

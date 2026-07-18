@@ -141,7 +141,7 @@ def build_music_video(project: str) -> Generator[str, None, None]:
     for idx, (s, start, dur) in enumerate(zip(scenes, starts, durs), 1):
         sid = s["shot_id"]
         ch = choreo.get(sid, {})
-        character = ch.get("character", "") or "duck"
+        character = (ch.get("character") or "").strip()   # empty => background-only scene
 
         # background plate per scene setting (cached by setting text)
         setting = s["description"] or "a sunny park meadow"
@@ -157,19 +157,29 @@ def build_music_video(project: str) -> Generator[str, None, None]:
                     yield f"ERROR: no background available for {sid}"; return
                 plate = fallbacks[0]
 
-        # character rig (auto-built + cached)
-        if character not in rig_cache:
-            yield f"[{idx}/{len(scenes)}] {sid}: preparing '{character}' rig..."
-            try:
-                rig_cache[character] = _resolve_rig(character)
-            except Exception as exc:  # noqa: BLE001
-                yield f"  rig build failed for '{character}' ({exc}); using duck"
-                rig_cache[character] = _resolve_rig("duck")
-        rig_dir, rig = rig_cache[character]
-        pos, scale = _auto_place(rig_dir, rig)
-
-        spec = author_scene(ch, rig, rig_dir, musicmap, start, dur, str(plate),
-                            duck_pos=pos, duck_scale=scale)
+        if not character:
+            # title card / no-character scene: background + gentle camera only.
+            spec = {"fps": FPS, "duration": round(dur, 3), "resolution": list(CANVAS),
+                    "layers": [{"name": "bg", "image": str(Path(plate).resolve()), "z": 0,
+                                "anchor": [576, 384],
+                                "keyframes": [{"t": 0.0, "pos": [576, 384], "scale": 1.0, "easing": "ease_in_out"},
+                                              {"t": round(dur, 3), "pos": [576, 384], "scale": 1.06}]}],
+                    "camera": {"keyframes": [{"t": 0.0, "pos": [576, 384], "zoom": 1.02, "easing": "ease_in_out"},
+                                             {"t": round(dur, 3), "pos": [576, 384], "zoom": 1.10}]}}
+            character = "(none)"
+        else:
+            # character rig (auto-built + cached)
+            if character not in rig_cache:
+                yield f"[{idx}/{len(scenes)}] {sid}: preparing '{character}' rig..."
+                try:
+                    rig_cache[character] = _resolve_rig(character)
+                except Exception as exc:  # noqa: BLE001
+                    yield f"  rig build failed for '{character}' ({exc}); using duck"
+                    rig_cache[character] = _resolve_rig("duck")
+            rig_dir, rig = rig_cache[character]
+            pos, scale = _auto_place(rig_dir, rig)
+            spec = author_scene(ch, rig, rig_dir, musicmap, start, dur, str(plate),
+                                duck_pos=pos, duck_scale=scale)
         spec_json = json.dumps(spec, indent=2)
         want = _sha(spec_json + f"|{start:.3f}|{dur:.3f}")
         mp4 = build_dir / f"{sid}.mp4"
