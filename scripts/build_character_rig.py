@@ -138,6 +138,72 @@ def generate(name):
                 break
 
 
+def _mouth_region(cut_rgba, bbox):
+    """Locate the mouth box on the character's FACE, whichever way it faces.
+
+    The old heuristic hard-coded the front of the head to the LEFT, so a
+    right-facing figure got its lip-sync region in empty space. Instead we find the
+    face by skin colour inside the head band (skin is warm: R>=G>=B with a clear
+    R-B margin, which excludes black hair where R≈G≈B) and put the mouth in the
+    lower-centre of that face box — no assumption about facing direction. Falls back
+    to a centred lower-head ellipse (still orientation-agnostic) if skin isn't found.
+    """
+    import numpy as np
+    from scipy import ndimage
+    x0, y0, x1, y1 = bbox
+    bw, bh = x1 - x0, y1 - y0
+    arr = np.asarray(cut_rgba).astype(int)
+    R, G, B, A = arr[..., 0], arr[..., 1], arr[..., 2], arr[..., 3]
+    # 1) work on the MAIN body blob only, so detached checkpoint artifacts (stray
+    #    shapes the model paints beside the character) can't hijack the face search.
+    solid = A > 40
+    lbl, n = ndimage.label(solid)
+    if n > 1:
+        sizes = ndimage.sum(solid, lbl, range(1, n + 1))
+        solid = lbl == (int(np.argmax(sizes)) + 1)
+    mys = np.where(solid.any(axis=1))[0]
+    by0, by1 = int(mys.min()), int(mys.max())
+    body_h = max(1, by1 - by0)
+    # 2) find the face = skin blob in the head band nearest the body's central axis
+    #    (not the topmost — a stray orange artifact beside the head reads as skin
+    #    and often sits higher, but the real face straddles the body centreline).
+    skin = (A > 60) & (R >= G - 4) & (G >= B - 4) & (R - B > 10) & (R < 250) & solid
+    band = skin.copy()
+    band[by0 + int(body_h * 0.30):, :] = False
+    head_solid = solid.copy(); head_solid[by0 + int(body_h * 0.30):, :] = False
+    hxs0 = np.where(head_solid.any(axis=0))[0]
+    axis_x = float(np.median(hxs0)) if hxs0.size else (x0 + x1) / 2
+    fl, fn = ndimage.label(band)
+    if fn:
+        def _axis_dist(c):
+            cxs = np.where((fl == c).any(axis=0))[0]
+            return abs(float(np.median(cxs)) - axis_x)
+        face = fl == min(range(1, fn + 1), key=_axis_dist)
+        fys, fxs = np.where(face)
+        if fxs.size >= 40:
+            fy0, fy1f = int(fys.min()), int(fys.max())
+            mcy = int(fy0 + (fy1f - fy0) * 0.80)           # mouth = lower face
+            lvl = face[max(by0, mcy - 5):mcy + 6, :]
+            xs_lvl = np.where(lvl.any(axis=0))[0]
+            mcx = int(np.median(xs_lvl)) if xs_lvl.size else int(np.median(fxs))
+            fw = int(fxs.max() - fxs.min()) or int(bw * 0.4)
+            mw = max(10, int(fw * 0.8))
+            mh = max(8, int((fy1f - fy0) * 0.28))
+            return mcx - mw // 2, mcy - mh // 2, mcx + mw // 2, mcy + mh // 2
+    # 3) fallback: front-lower of the head silhouette, side chosen by where skin sits.
+    head_y1 = by0 + int(body_h * 0.28)
+    hmask = solid.copy(); hmask[head_y1:, :] = False
+    hxs = np.where(hmask.any(axis=0))[0]
+    hx0, hx1 = (int(hxs.min()), int(hxs.max())) if hxs.size else (x0, x1)
+    hw = max(1, hx1 - hx0)
+    sk = skin & hmask
+    faces_left = sk[:, hx0:hx0 + hw // 3].sum() >= sk[:, hx1 - hw // 3:hx1 + 1].sum()
+    mcx = hx0 + int(hw * 0.25) if faces_left else hx1 - int(hw * 0.25)
+    mcy = by0 + int((head_y1 - by0) * 0.72)
+    mw, mh = max(12, int(hw * 0.4)), max(10, int((head_y1 - by0) * 0.22))
+    return mcx - mw // 2, mcy - mh // 2, mcx + mw // 2, mcy + mh // 2
+
+
 def cut(name, candidate, out=None):
     import numpy as np
     from PIL import Image, ImageDraw, ImageFilter
@@ -159,9 +225,8 @@ def cut(name, candidate, out=None):
     bw, bh = x1 - x0, y1 - y0
     body_anchor = ((x0 + x1) // 2, (y0 + y1) // 2)
 
-    # heuristic mouth region: front (left) of the head, upper-third of the body.
-    mx0, my0 = x0 + int(bw * 0.00), y0 + int(bh * 0.24)
-    mx1, my1 = x0 + int(bw * 0.26), y0 + int(bh * 0.52)
+    # mouth region on the face, orientation-agnostic (see _mouth_region).
+    mx0, my0, mx1, my1 = _mouth_region(cut_rgba, (x0, y0, x1, y1))
     mask = Image.new("L", (cw, ch), 0)
     ImageDraw.Draw(mask).ellipse((mx0, my0, mx1, my1), fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(6))
