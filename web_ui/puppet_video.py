@@ -30,9 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 FPS = 24
 CANVAS = (1152, 768)
-GROUND_FRAC = 0.86        # character feet sit here (fraction of canvas height)
-CHAR_HEIGHT_FRAC = 0.52   # character height as a fraction of canvas height
-CHAR_X_FRAC = 0.40        # horizontal placement of the character
+GROUND_FRAC = 0.88        # character feet sit here (fraction of canvas height)
+CHAR_HEIGHT_FRAC = 0.60   # character height as a fraction of canvas height
+CHAR_X_FRAC = 0.42        # horizontal placement of the character
 
 
 def _sha(text: str) -> str:

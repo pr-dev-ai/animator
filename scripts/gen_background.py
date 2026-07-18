@@ -10,11 +10,13 @@ ckpt = P._find_checkpoint()
 
 setting = sys.argv[1] if len(sys.argv) > 1 else "sunny park meadow with a pond"
 name = sys.argv[2] if len(sys.argv) > 2 else "park_pond"
-PROMPT = ("cartoon, flat color, children's illustration, 2d, bold outlines, bright, "
-          f"{setting}, green grass, trees, blue sky with clouds, flowers, "
-          "empty scenery, wide establishing shot, no animals, no characters, no people")
+PROMPT = ("flat 2d cartoon background, flat color, bold clean outlines, cel shading, "
+          "children's cartoon illustration, simple shapes, bright and cheerful, "
+          f"{setting}, empty scenery, wide establishing shot, "
+          "no animals, no characters, no people")
 NEG = ("animals, ducks, rabbits, cats, characters, people, person, creatures, foreground subject, "
-       "text, watermark, realistic, photo, dark")
+       "text, watermark, realistic, photo, painterly, soft shading, gradient, "
+       "3d render, detailed rendering, dark")
 
 wf = P._comfyui_workflow(PROMPT, NEG, f"bg_{name}", ckpt)
 for node in wf.values():

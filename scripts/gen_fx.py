@@ -54,7 +54,15 @@ def _star(s=40):
     return img.filter(ImageFilter.GaussianBlur(0.8))
 
 
-_MAKERS = {"cloud": _soft_cloud, "sparkle": _sparkle, "star": _star}
+def _shadow(w=340, h=110):
+    from PIL import Image, ImageDraw, ImageFilter
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.ellipse((w * 0.08, h * 0.18, w * 0.92, h * 0.82), fill=(20, 25, 30, 140))
+    return img.filter(ImageFilter.GaussianBlur(14))
+
+
+_MAKERS = {"cloud": _soft_cloud, "sparkle": _sparkle, "star": _star, "shadow": _shadow}
 
 
 def ensure_fx(name: str) -> Path:

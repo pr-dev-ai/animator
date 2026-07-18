@@ -125,41 +125,37 @@ def _add_sparkles(layers, gen_fx, dur, W, H, sample, count):
                            "easing": "ease_in_out"})})
 
 
-def _body_motion(choreo, beats, dur, pos, scale, intensity):
-    """Rich per-action body motion — the difference between a cartoon and a sticker.
-
-    LOCOMOTION (walk/hop/run/slide, or any non-singing character): the character
-    TRAVELS across the scene with a walk-bounce, waddle rock and squash-and-stretch
-    on each step.  PERFORMANCE (a singing character): stays put but performs —
-    energetic side-sway, on-beat bounce, body squash and a waddle rock, so a singer
-    reads as alive-in-place instead of vibrating.
+def _body_motion(choreo, beats, dur, pos, scale, intensity, direction=1):
+    """Per-action body motion. The character mostly PERFORMS IN PLACE (music-video /
+    storyboard feel) — lively sway, bob, squash — and stays centred, instead of
+    marching across every shot. Only an explicit 'walk'/'run' travels, and then only
+    a modest span around centre with an alternating direction; 'hop' bounces in place.
     """
     style = (choreo.get("body_motion") or "bob").lower()
-    sings = bool(choreo.get("sings"))
     x0, y0 = pos
     W = CANVAS[0]
-    step = 0.42                                   # waddle/step cadence (s)
+    step = 0.42                                   # step/sway cadence (s)
     amp = 0.6 + intensity                         # scale motion by Claude's intensity
-    locomote = style in ("slide", "hop", "run", "walk") or not sings
+    travels = style in ("walk", "run")            # ONLY these cross the frame
+    span = int(0.22 * W)                          # modest, centred travel distance
 
     kf = []
     t, i = 0.0, 0
     while t <= dur + 1e-6:
         ph = t / step
-        if locomote:
-            # travel across; hop = bigger arc + forward leaps, walk/run = steady glide
+        if travels:                               # cross a small span, centred on x0
             frac = min(1.0, t / max(0.1, dur))
-            x = int(180 + (W - 360) * (frac if style != "run" else frac))
-            if style == "hop":
-                bounce = -44 * amp * abs(math.sin(math.pi * ph))
-            else:
-                bounce = -22 * amp * abs(math.sin(math.pi * ph))
+            x = int(x0 + direction * span * (frac - 0.5))
+            bounce = -22 * amp * abs(math.sin(math.pi * ph))
             rock = 7 * math.sin(2 * math.pi * (t / (2 * step)))
-        else:
-            # perform in place: sway + on-beat bounce
-            x = int(x0 + 26 * amp * math.sin(2 * math.pi * (t / (2 * step))))
-            bounce = -18 * amp * abs(math.sin(math.pi * ph))
-            rock = 6 * math.sin(2 * math.pi * (t / (2 * step)))
+        elif style == "hop":                      # jump up and down in place
+            x = int(x0 + 10 * amp * math.sin(2 * math.pi * (t / (2 * step))))
+            bounce = -46 * amp * abs(math.sin(math.pi * ph))
+            rock = 4 * math.sin(2 * math.pi * (t / (2 * step)))
+        else:                                     # perform in place: sway + bob
+            x = int(x0 + 30 * amp * math.sin(2 * math.pi * (t / (2.2 * step))))
+            bounce = -20 * amp * abs(math.sin(math.pi * ph))
+            rock = 7 * math.sin(2 * math.pi * (t / (2 * step)))
         down = (i % 2 == 0)
         # breathing: slow chest rise/fall (~2.4s), so even a near-still character
         # is never frozen; combines with the per-step squash below.
@@ -170,9 +166,9 @@ def _body_motion(choreo, beats, dur, pos, scale, intensity):
                    "scale": [sx, sy], "easing": "ease_in_out"})
         t += step / 2
         i += 1
-    # settle to rest at the end
-    kf.append({"t": round(dur, 3), "pos": [x0 if not locomote else int(W - 180), y0],
-               "rot": 0, "scale": scale, "easing": "ease_in_out"})
+    # settle to rest at centre (not marched to the edge)
+    kf.append({"t": round(dur, 3), "pos": [x0, y0], "rot": 0, "scale": scale,
+               "easing": "ease_in_out"})
     return kf
 
 
@@ -194,11 +190,27 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
     ba = rig["body_anchor"]
     parts = rig["parts"]
     intensity = float(choreo.get("intensity", 0.6))
-    body_kf = _body_motion(choreo, beats, dur, duck_pos, duck_scale, intensity)
+    direction = 1 if int(start) % 2 == 0 else -1        # alternate walk direction
+    body_kf = _body_motion(choreo, beats, dur, duck_pos, duck_scale, intensity, direction)
+
+    # ground contact shadow: follows the character's x at the ground line so the
+    # figure sits IN the scene instead of looking pasted on top of the plate.
+    ground_y = int(0.87 * CANVAS[1])
+    try:
+        import gen_fx
+        shadow_img = str(gen_fx.ensure_fx("shadow"))
+        sh_scale = round(max(0.45, duck_scale * 1.15), 3)
+        shadow_kf = [{"t": k["t"], "pos": [k["pos"][0], ground_y], "scale": sh_scale,
+                      "easing": "ease_in_out"} for k in body_kf]
+        shadow_layer = [{"name": "shadow", "image": shadow_img, "z": 1, "anchor": [170, 55],
+                         "keyframes": shadow_kf}]
+    except Exception:  # noqa: BLE001
+        shadow_layer = []
 
     layers = [
         {"name": "bg", "image": str(bg_image), "z": 0, "anchor": [576, 384],
          "keyframes": _camera_bg(choreo, dur)},
+        *shadow_layer,
         {"name": "body", "image": str(rig_dir / parts["body"]["image"]),
          "z": parts["body"]["z"], "anchor": list(parts["body"]["anchor"]), "keyframes": body_kf},
     ]
