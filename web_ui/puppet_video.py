@@ -173,8 +173,14 @@ def prepare_assets(project: str) -> Generator[str, None, None]:
     yield "DONE"
 
 
-def build_music_video(project: str) -> Generator[str, None, None]:
-    """Build outputs/<project>_animated.mp4 from the puppet pipeline."""
+def build_music_video(project: str, captions: bool = False) -> Generator[str, None, None]:
+    """Build outputs/<project>_animated.mp4 from the puppet pipeline.
+
+    captions: burn lyric captions in. Off by default — with the scene durations
+    stretched to fill the song (and Hindi word-timing unreliable), the lines drift
+    out of sync with the vocals, so they hurt more than help. Re-enable per project
+    once reliable per-line vocal timing is available.
+    """
     import animation_api as A       # proven resumable render + concat/mux helpers
     import blender_render
     from scene_director import author_scene
@@ -306,7 +312,7 @@ def build_music_video(project: str) -> Generator[str, None, None]:
 
     out = OUTPUTS_DIR / f"{project}_animated.mp4"
     subs = build_dir / "_captions.ass"
-    has_caps = _write_captions_ass(scenes, starts, durs, subs)
+    has_caps = captions and _write_captions_ass(scenes, starts, durs, subs)
     yield (f"Concatenating {len(section_mp4s)} scenes, "
            + ("burning lyric captions, " if has_caps else "")
            + "muxing the song...")
