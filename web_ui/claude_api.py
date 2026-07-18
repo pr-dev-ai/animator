@@ -740,6 +740,80 @@ def author_scene_motion(prompt: str, camera: str, duration: float) -> dict:
     return motions.get(shot_id, _fallback_motion())
 
 
+_BODY_MOTIONS = ("still", "bob", "sway", "hop", "slide")
+_CAMERAS = ("hold", "push_in", "pull_out", "pan_left", "pan_right")
+
+
+def _fallback_choreo(reason: str = "default (Claude unavailable)") -> dict:
+    """Sane choreography when Claude can't direct a scene."""
+    return {"character": "", "sings": True, "body_motion": "bob",
+            "camera": "push_in", "intensity": 0.6, "mood": "happy", "reason": reason}
+
+
+def direct_scenes(shots: list[dict]) -> dict:
+    """Direct a whole shot list in ONE Claude call: scene -> choreography.
+
+    Each shot: {shot_id, prompt/description, camera, duration}. Returns
+    {shot_id: {character, sings, body_motion, camera, intensity, mood, reason}}
+    for the deterministic scene author (scripts/scene_director.py) to execute.
+
+    Never raises: any failure degrades to sane default choreography so the build
+    always proceeds. This is the "Claude directs, code executes" split — Claude
+    makes the creative call, the renderer stays deterministic.
+    """
+    result = {str(s.get("shot_id", "")): _fallback_choreo() for s in shots}
+    usable = [s for s in shots if str(s.get("prompt", s.get("description", ""))).strip()]
+    if not usable:
+        return result
+    try:
+        check_api_key()
+        client = _get_client()
+        lines = [{"shot_id": str(s.get("shot_id", "")),
+                  "duration": round(_coerce_duration(s.get("duration"), 4.0), 1),
+                  "description": str(s.get("prompt", s.get("description", ""))).strip()[:400]}
+                 for s in usable]
+        user_prompt = (
+            "You are the animation director for a children's music video. For each "
+            "scene below, decide how its main character should be animated. Return an "
+            "object per scene with keys:\n"
+            '  "shot_id" (echo the id),\n'
+            '  "character" (the main animal/character, e.g. "duck", "bunny", '
+            '"squirrel"; "" if none/title card),\n'
+            '  "sings" (boolean: is this character singing/vocalising here? drives lip-sync),\n'
+            f'  "body_motion" (one of {", ".join(_BODY_MOTIONS)}),\n'
+            f'  "camera" (one of {", ".join(_CAMERAS)}),\n'
+            '  "intensity" (number 0.0-1.0, how energetic),\n'
+            '  "mood" (short string),\n'
+            '  "reason" (short: why this fits the scene).\n\n'
+            "Match the motion to the scene: a character singing a verse -> bob + sings true; "
+            "running/chasing -> slide or hop; a calm establishing shot -> still + push_in. "
+            "Return ONLY a JSON array, one object per scene.\n\n"
+            f"Scenes:\n{json.dumps(lines, indent=2)}"
+        )
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001", max_tokens=2048,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        parsed = json.loads(_strip_fences(_extract_text(response)))
+        if not isinstance(parsed, list):
+            raise ValueError("expected a JSON array")
+        for item in parsed:
+            sid = str(item.get("shot_id", ""))
+            if sid in result:
+                result[sid] = {
+                    "character": str(item.get("character", "")).strip(),
+                    "sings": bool(item.get("sings", True)),
+                    "body_motion": item.get("body_motion") if item.get("body_motion") in _BODY_MOTIONS else "bob",
+                    "camera": item.get("camera") if item.get("camera") in _CAMERAS else "push_in",
+                    "intensity": max(0.0, min(1.0, _coerce_duration(item.get("intensity"), 0.6))),
+                    "mood": str(item.get("mood", "happy"))[:40],
+                    "reason": str(item.get("reason", ""))[:120],
+                }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("direct_scenes: Claude call failed (%s); using defaults", exc)
+    return result
+
+
 def generate_storyboard_prompts(
     project_name: str, shotlist: list, style_guide: str, lyrics: str = ""
 ) -> list:
