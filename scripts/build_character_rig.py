@@ -35,13 +35,20 @@ def _is_human(name: str) -> bool:
     return any(w in n for w in _HUMAN_WORDS)
 
 
+# Cultural default for human characters. The image checkpoint is anime-tuned and
+# defaults to Japanese anime figures; this steers people to the project's culture.
+# Change per project/theme (this app makes Hindi/Indian kids' content).
+CHARACTER_CULTURE = "Indian"
+
+
 def _prompt(name):
     if _is_human(name):
         return (
             "cartoon, flat color, children's storybook illustration, 2d, bold clean outlines, "
-            f"simple shapes, cute, ONE single solo cartoon {name}, alone, a single pose, full body, "
-            "strict side view profile facing left, standing, a distinct visible mouth, happy, "
-            "simple clothes, plain solid white background, no scenery, centered"
+            f"simple shapes, cute, ONE single solo cartoon {CHARACTER_CULTURE} {name}, "
+            "brown skin, black hair, wearing colourful traditional Indian clothes, big dark eyes, "
+            "alone, a single pose, full body, strict side view profile facing left, standing, "
+            "a distinct visible mouth, happy, plain solid white background, no scenery, centered"
         )
     return (
         "cartoon, flat color, children's illustration, 2d, bold clean outlines, simple shapes, cute, "
@@ -55,9 +62,11 @@ def _neg(name):
     base = ("front view, three-quarter, 3/4 view, back view, multiple characters, two figures, "
             "scenery, background, realistic, photo, dark, cropped, extra limbs")
     if _is_human(name):
-        # humans need arms/hands, but SD loves turnaround sheets — kill those hard
+        # humans need arms/hands, but SD defaults to anime turnaround sheets — kill
+        # both the sheets and the anime/pale-skin default so we get one Indian figure
         return (base + ", character sheet, reference sheet, model sheet, turnaround, "
-                "multiple views, multiple poses, three views, front and back, grid, duplicate")
+                "multiple views, multiple poses, three views, front and back, grid, duplicate, "
+                "anime, japanese, manga, pale skin, white skin, blonde hair, pink hair, blue eyes")
     return base + ", human, humanoid, person, arms, hands"
 
 
@@ -202,8 +211,10 @@ def _score_candidate(path) -> float:
     ys, xs = np.where(solid)
     bw, bh = xs.max() - xs.min(), ys.max() - ys.min()
     aspect = bw / max(1, bh)
-    width_pen = max(0.0, aspect - 1.1)                 # penalise very wide (turnaround)
-    return single_share - 0.6 * width_pen
+    # a clean standing/side figure is TALLER than wide (aspect ~0.4-0.75); wings,
+    # turnarounds and multi-figure blobs are wide (aspect >~0.9) — penalise hard.
+    width_pen = max(0.0, aspect - 0.78)
+    return single_share - 2.2 * width_pen
 
 
 def ensure_rig(name, char_dir=None) -> Path:
