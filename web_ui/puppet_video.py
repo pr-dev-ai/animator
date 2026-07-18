@@ -110,7 +110,8 @@ def build_music_video(project: str) -> Generator[str, None, None]:
         return
 
     # --- scene timing: stretch shot durations to fill the song ---
-    total_song = A._audio_duration(song) if hasattr(A, "_audio_duration") else None
+    import make_dailies
+    total_song = make_dailies.probe_duration(song) or None
     durs = []
     for s in scenes:
         try:
@@ -199,12 +200,42 @@ def build_music_video(project: str) -> Generator[str, None, None]:
     out = OUTPUTS_DIR / f"{project}_animated.mp4"
     yield f"Concatenating {len(section_mp4s)} scenes and muxing the song..."
     try:
-        A._concat_and_mux(ffmpeg, section_mp4s, song, out, build_dir)
+        _concat_and_mux(ffmpeg, section_mp4s, song, out, build_dir)
     except Exception as exc:  # noqa: BLE001
         yield f"ERROR: {exc}"; return
     mb = out.stat().st_size / (1024 * 1024)
     yield f"Wrote {out} ({mb:.1f} MB, {t:.0f}s, video+audio)"
     yield "DONE"
+
+
+def _concat_and_mux(ffmpeg, section_mp4s, song, out_path, work_dir):
+    """Lossless-concat the scene MP4s (same encoder params) and mux the song.
+
+    Self-contained (does not depend on animation_api internals): concat demuxer with
+    -c copy, then mux the song with -shortest so the video length is authoritative.
+    Intermediates live in work_dir and are cleaned up.
+    """
+    import subprocess
+    listfile = work_dir / "_concat_list.txt"
+    concat = work_dir / "_concat_video.mp4"
+    try:
+        listfile.write_text("".join(f"file '{Path(p).as_posix()}'\n" for p in section_mp4s),
+                            encoding="utf-8")
+        r = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                            "-f", "concat", "-safe", "0", "-i", str(listfile),
+                            "-c", "copy", str(concat)], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"concat failed: {r.stderr[-600:]}")
+        r = subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                            "-i", str(concat), "-i", str(song),
+                            "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+                            "-map", "0:v:0", "-map", "1:a:0", "-shortest",
+                            "-movflags", "+faststart", str(out_path)], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"mux failed: {r.stderr[-600:]}")
+    finally:
+        listfile.unlink(missing_ok=True)
+        concat.unlink(missing_ok=True)
 
 
 def _gen_plate(setting: str, out_path: Path):
