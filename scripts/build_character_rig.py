@@ -170,6 +170,49 @@ def generate(name):
                 break
 
 
+def articulate_rig(rig_dir, rig=None):
+    """Split body.png into an independently-movable HEAD + torso, so the renderer can
+    nod/tilt the head — real body movement, not just a sliding image. The head is cut
+    at the neck (found from the face-skin blob's chin) with overlap so a small tilt
+    never opens a gap. Idempotent; the mouth re-parents to the head. Returns the rig."""
+    import numpy as np
+    from PIL import Image
+    from scipy import ndimage
+    rig_dir = Path(rig_dir)
+    rig = rig or json.loads((rig_dir / "rig.json").read_text(encoding="utf-8"))
+    parts = rig["parts"]
+    if "head" in parts:
+        return rig
+    body = Image.open(rig_dir / parts["body"]["image"]).convert("RGBA")
+    arr = np.asarray(body); A = arr[:, :, 3]
+    R, G, B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
+    solid = A > 40
+    ys, xs = np.where(solid)
+    if not len(ys):
+        return rig
+    y0, y1 = int(ys.min()), int(ys.max()); bh = y1 - y0; cx = int(np.median(xs))
+    skin = (A > 60) & (R >= G - 4) & (G >= B - 4) & (R - B > 10) & (R < 250) & solid
+    band = skin.copy(); band[y0 + int(bh * 0.45):, :] = False
+    fl, fn = ndimage.label(band); axis = float(np.median(xs))
+    if fn:
+        face = fl == min(range(1, fn + 1),
+                         key=lambda c: abs(float(np.median(np.where((fl == c).any(axis=0))[0])) - axis))
+        chin = int(np.where(face.any(axis=1))[0].max())
+    else:
+        chin = y0 + int(bh * 0.32)
+    neck_y = min(y1, chin + int(bh * 0.03)); overlap = int(bh * 0.05)
+    head = arr.copy(); head[neck_y + overlap:, :, 3] = 0     # head + a little neck
+    torso = arr.copy(); torso[:neck_y, :, 3] = 0             # everything from neck down
+    Image.fromarray(head, "RGBA").save(rig_dir / "head.png")
+    Image.fromarray(torso, "RGBA").save(rig_dir / "torso.png")
+    parts["body"]["image"] = "torso.png"                    # 'body' now draws the torso
+    parts["head"] = {"image": "head.png", "anchor": [cx, neck_y], "z": 3, "parent": "body"}
+    if "mouth" in parts:
+        parts["mouth"]["parent"] = "head"                   # mouth rides the head
+    (rig_dir / "rig.json").write_text(json.dumps(rig, indent=2))
+    return rig
+
+
 def _mouth_region(cut_rgba, bbox):
     """Locate the mouth box on the character's FACE, whichever way it faces.
 
@@ -312,6 +355,7 @@ def cut(name, candidate, out=None):
     checker(cut_rgba, str(out / "rig_preview.png"))
     print(f"{name}: bbox ({x0},{y0})-({x1},{y1}) body_anchor {body_anchor} "
           f"mouth_anchor {mouth_anchor}  -> {out/'rig.json'}")
+    articulate_rig(out, rig)    # split head/torso so the head can nod/tilt
 
 
 def _generate_one(name, seed, culture=None, out=None):

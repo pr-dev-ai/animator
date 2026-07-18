@@ -199,6 +199,22 @@ def _body_motion(choreo, beats, dur, pos, scale, intensity, direction=1):
     return kf
 
 
+def _head_motion(hoff, dur, intensity):
+    """Gentle nod + side tilt of the head, parented to the body — the difference
+    between a character that's alive and one that's a sliding image. Scaled by the
+    scene's intensity; settles to neutral at the end."""
+    amp = 0.5 + intensity
+    kf, t = [], 0.0
+    while t <= dur + 1e-6:
+        tilt = 6.0 * amp * math.sin(2 * math.pi * t / 1.5)
+        bob = -4.0 * amp * abs(math.sin(math.pi * t / 0.42))
+        kf.append({"t": round(t, 3), "pos": [hoff[0], hoff[1] + int(bob)],
+                   "rot": round(tilt, 1), "easing": "ease_in_out"})
+        t += 0.18
+    kf.append({"t": round(dur, 3), "pos": hoff, "rot": 0})
+    return kf
+
+
 def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
                  start: float, dur: float, bg_image: str,
                  duck_pos=(470, 500), duck_scale=0.9) -> dict:
@@ -242,10 +258,21 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
          "z": parts["body"]["z"], "anchor": list(parts["body"]["anchor"]), "keyframes": body_kf},
     ]
 
+    # --- head: independent nod/tilt so the character has real body movement ---
+    if "head" in parts:
+        hd = parts["head"]
+        hoff = [hd["anchor"][0] - ba[0], hd["anchor"][1] - ba[1]]
+        layers.append({"name": "head", "image": str(rig_dir / hd["image"]),
+                       "z": hd["z"], "parent": hd.get("parent", "body"),
+                       "anchor": list(hd["anchor"]), "keyframes": _head_motion(hoff, dur, intensity)})
+
     # --- mouth: lip-sync on words, else beat-bob (Hindi/low-conf/non-singing) ---
     if "mouth" in parts:
         m = parts["mouth"]
-        moff = [m["anchor"][0] - ba[0], m["anchor"][1] - ba[1]]
+        # offset is measured from the mouth's PARENT anchor (head when articulated)
+        mparent = m.get("parent", "body")
+        pa = parts["head"]["anchor"] if (mparent == "head" and "head" in parts) else ba
+        moff = [m["anchor"][0] - pa[0], m["anchor"][1] - pa[1]]
         mkf = [{"t": 0.0, "pos": moff, "rot": 0, "easing": "ease_in_out"}]
         if words:
             for w in words:
@@ -262,7 +289,7 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
             lip = "closed (not singing)"
         mkf.append({"t": round(dur, 3), "pos": moff, "rot": 0})
         layers.append({"name": "mouth", "image": str(rig_dir / m["image"]),
-                       "z": m["z"], "parent": "body", "anchor": list(m["anchor"]), "keyframes": mkf})
+                       "z": m["z"], "parent": mparent, "anchor": list(m["anchor"]), "keyframes": mkf})
     else:
         lip = "no mouth part"
 
