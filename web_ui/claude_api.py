@@ -744,6 +744,36 @@ _BODY_MOTIONS = ("still", "bob", "sway", "hop", "slide")
 _CAMERAS = ("hold", "push_in", "pull_out", "pan_left", "pan_right")
 
 
+def _parse_scene_objects(text: str) -> list:
+    """Parse a JSON array of scene objects, salvaging a truncated response.
+
+    A long shot list can overrun the model's token budget and cut the JSON off
+    mid-array. Rather than lose every scene to a parse error, pull out as many
+    complete top-level objects as decoded cleanly (the tail object is dropped)."""
+    text = _strip_fences(text).strip()
+    try:
+        v = json.loads(text)
+        if isinstance(v, list):
+            return v
+    except Exception:  # noqa: BLE001 — fall through to object-by-object salvage
+        pass
+    objs, dec = [], json.JSONDecoder()
+    i = text.find("[")
+    i = 0 if i < 0 else i + 1
+    n = len(text)
+    while i < n:
+        while i < n and text[i] in " \t\r\n,":
+            i += 1
+        if i >= n or text[i] == "]":
+            break
+        try:
+            obj, i = dec.raw_decode(text, i)
+        except Exception:  # noqa: BLE001 — reached the truncated tail; stop
+            break
+        objs.append(obj)
+    return objs
+
+
 def _fallback_choreo(reason: str = "default (Claude unavailable)") -> dict:
     """Sane choreography when Claude can't direct a scene."""
     return {"character": "", "setting": "sunny park meadow", "sings": True,
@@ -797,13 +827,16 @@ def direct_scenes(shots: list[dict]) -> dict:
             "Return ONLY a JSON array, one object per scene.\n\n"
             f"Scenes:\n{json.dumps(lines, indent=2)}"
         )
+        # Budget ~300 tokens per scene object so a long shot list isn't truncated
+        # mid-array (which used to drop every scene to the empty-character fallback).
+        max_tokens = max(2048, min(8000, 400 + 300 * len(lines)))
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001", max_tokens=2048,
+            model="claude-haiku-4-5-20251001", max_tokens=max_tokens,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        parsed = json.loads(_strip_fences(_extract_text(response)))
-        if not isinstance(parsed, list):
-            raise ValueError("expected a JSON array")
+        parsed = _parse_scene_objects(_extract_text(response))
+        if not parsed:
+            raise ValueError("no scene objects parsed from response")
         for item in parsed:
             sid = str(item.get("shot_id", ""))
             if sid in result:
