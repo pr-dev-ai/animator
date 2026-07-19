@@ -278,7 +278,8 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
             mimg = str(gen_fx.ensure_fx("mouth_open"))
         except Exception:  # noqa: BLE001
             mimg = str(rig_dir / m["image"])
-        OPEN, SHUT = 1.0, 0.06                    # scale of the open-mouth sprite
+        OPEN, SHUT = 0.55, 0.05                   # scale of the open-mouth sprite
+                                                  # (kept small so the mouth/face ratio reads right)
         mkf = [{"t": 0.0, "pos": moff, "scale": SHUT, "easing": "ease_in_out"}]
         if words:                                 # precise per-word (English)
             for w in words:

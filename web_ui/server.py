@@ -228,6 +228,17 @@ def list_templates() -> Response | tuple[Response, int]:
         return _err(str(exc))
 
 
+@app.route("/api/song-ideas", methods=["GET"])
+def list_song_ideas() -> Response | tuple[Response, int]:
+    """Consolidated song picker (theme+template+style bundled) for the Lyrics stage."""
+    try:
+        from web_ui import claude_api  # lazy import
+        return _ok({"ideas": claude_api.list_song_ideas()})
+    except Exception as exc:
+        logger.exception("list_song_ideas failed")
+        return _err(str(exc))
+
+
 @app.route("/api/generate/lyrics", methods=["POST"])
 def generate_lyrics() -> Response | tuple[Response, int]:
     try:

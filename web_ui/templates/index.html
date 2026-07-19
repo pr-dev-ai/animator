@@ -112,26 +112,16 @@
           <h2 class="card-h">Generate lyrics</h2>
           <div class="grid-2">
             <div class="field">
-              <label for="lyrics-template">Song template</label>
-              <select id="lyrics-template" class="input">
-                <option value="">— free-form —</option>
+              <label for="lyrics-song">Song</label>
+              <select id="lyrics-song" class="input">
+                <option value="__custom__">✏️ Type my own theme…</option>
               </select>
-              <p class="hint">Shapes the whole song — lullaby, counting, alphabet, moral story…</p>
+              <p class="hint">Pick a ready-made song — its theme, style and structure are all set for you.</p>
             </div>
-            <div class="field">
-              <label for="lyrics-theme">Theme</label>
+            <div class="field" id="custom-theme-field" hidden>
+              <label for="lyrics-theme">Your theme</label>
               <input id="lyrics-theme" class="input" type="text"
-                     placeholder="Wheels on the bus" list="theme-suggestions" autocomplete="off" />
-              <datalist id="theme-suggestions">
-                <option value="Wheels on the bus"></option>
-                <option value="Animals at the farm"></option>
-                <option value="Under the sea"></option>
-                <option value="Counting to ten"></option>
-                <option value="Colors of the rainbow"></option>
-                <option value="Twinkle twinkle little star"></option>
-                <option value="A day at the park"></option>
-                <option value="Bedtime and dreams"></option>
-              </datalist>
+                     placeholder="e.g. a brave little elephant" autocomplete="off" />
             </div>
             <div class="field">
               <label for="lyrics-language">Language</label>
@@ -140,15 +130,6 @@
                 <option value="Hindi">Hindi</option>
               </select>
               <p class="hint">Only English &amp; Hindi are verified end-to-end.</p>
-            </div>
-            <div class="field">
-              <label for="lyrics-style">Style</label>
-              <select id="lyrics-style" class="input">
-                <option value="nursery rhyme">Nursery rhyme</option>
-                <option value="upbeat pop">Upbeat pop</option>
-                <option value="folk">Folk</option>
-                <option value="lullaby">Lullaby</option>
-              </select>
             </div>
             <div class="field">
               <label for="lyrics-verses">Verses</label>

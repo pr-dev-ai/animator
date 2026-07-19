@@ -112,6 +112,46 @@ def list_song_templates() -> list:
             for k, v in SONG_TEMPLATES.items()]
 
 
+# One consolidated picker for the UI: each song idea bundles a theme + the template
+# that shapes it + a music style, so the user picks ONE thing instead of juggling
+# three confusing fields. `group` drives the dropdown's optgroups.
+SONG_IDEAS = [
+    # --- Nursery rhymes ---
+    ("wheels_bus", "Wheels on the Bus", "Nursery Rhymes", "the wheels on the bus going round through town", "nursery", "nursery rhyme"),
+    ("twinkle", "Twinkle Twinkle Little Star", "Nursery Rhymes", "a twinkling little star in the night sky", "lullaby", "lullaby"),
+    ("old_macdonald", "Old MacDonald's Farm", "Nursery Rhymes", "the animals on Old MacDonald's farm", "nursery", "nursery rhyme"),
+    ("itsy_spider", "Itsy Bitsy Spider", "Nursery Rhymes", "the itsy bitsy spider climbing the water spout", "nursery", "nursery rhyme"),
+    ("five_ducks", "Five Little Ducks", "Nursery Rhymes", "five little ducks who went out to play", "counting", "nursery rhyme"),
+    ("row_boat", "Row Row Row Your Boat", "Nursery Rhymes", "rowing a boat gently down the stream", "nursery", "nursery rhyme"),
+    # --- Learning ---
+    ("counting_10", "Counting 1 to 10", "Learning", "counting from one to ten with fun objects", "counting", "upbeat pop"),
+    ("abc", "ABC Alphabet Song", "Learning", "the alphabet from A to Z", "alphabet", "upbeat pop"),
+    ("colors", "Colours of the Rainbow", "Learning", "the seven colours of the rainbow", "nursery", "upbeat pop"),
+    ("shapes", "Learning Shapes", "Learning", "circles, squares and triangles all around", "nursery", "upbeat pop"),
+    ("days_week", "Days of the Week", "Learning", "the seven days of the week", "counting", "upbeat pop"),
+    # --- Themes & stories ---
+    ("under_sea", "Under the Sea", "Themes & Stories", "colourful fish and creatures under the sea", "nursery", "upbeat pop"),
+    ("jungle", "Jungle Animals", "Themes & Stories", "wild animals living in the jungle", "nursery", "upbeat pop"),
+    ("park_day", "A Day at the Park", "Themes & Stories", "a fun day playing at the park", "nursery", "upbeat pop"),
+    ("bedtime", "Bedtime & Dreams", "Themes & Stories", "getting sleepy and drifting into sweet dreams", "lullaby", "lullaby"),
+    ("seasons", "The Four Seasons", "Themes & Stories", "spring, summer, autumn and winter", "nursery", "folk"),
+    ("my_family", "My Family", "Themes & Stories", "love and fun with my family", "nursery", "folk"),
+    ("village_life", "Village Life", "Themes & Stories", "a happy day in an Indian village", "moral", "folk"),
+    ("festival", "Festival of Colours", "Themes & Stories", "celebrating a bright, colourful festival", "action", "upbeat pop"),
+    ("sharing", "Sharing is Caring", "Themes & Stories", "learning to share and be kind to friends", "moral", "folk"),
+    # --- Action & dance ---
+    ("if_happy", "If You're Happy", "Action & Dance", "clapping and stomping when you're happy", "action", "upbeat pop"),
+    ("dance_party", "Dance Party", "Action & Dance", "dancing and moving to the music", "action", "upbeat pop"),
+    ("head_toes", "Head, Shoulders, Knees & Toes", "Action & Dance", "touching head, shoulders, knees and toes", "action", "upbeat pop"),
+]
+
+
+def list_song_ideas() -> list:
+    """Consolidated song picker for the UI: [{id, label, group, theme, template, style}]."""
+    return [{"id": i, "label": lbl, "group": grp, "theme": th, "template": tmpl, "style": st}
+            for (i, lbl, grp, th, tmpl, st) in SONG_IDEAS]
+
+
 def generate_lyrics(theme: str, style: str, num_verses: int, language: str = "English",
                     template: str | None = None) -> dict:  # noqa: D417
     """Generate kids song lyrics for the given theme and style.

@@ -429,12 +429,16 @@ async function loadLyricsIntoEditor() {
 
 async function generateLyrics() {
   if (!requireProject()) return;
-  const theme = $('lyrics-theme').value.trim();
-  const style = $('lyrics-style').value.trim();
+  const sel = $('lyrics-song');
+  const isCustom = !sel || sel.value === '__custom__';
+  // one consolidated pick expands to theme + template + style; custom uses the text box
+  const idea = isCustom ? null : SONG_IDEAS[sel.value];
+  const theme = isCustom ? $('lyrics-theme').value.trim() : (idea ? idea.theme : '');
+  const template = idea ? idea.template : '';
+  const style = idea ? idea.style : '';
   const language = $('lyrics-language').value;
-  const template = $('lyrics-template') ? $('lyrics-template').value : '';
   const verses = parseInt($('lyrics-verses').value, 10) || 3;
-  if (!theme) { toast('Enter a theme', 'error'); return; }
+  if (!theme) { toast(isCustom ? 'Enter your theme' : 'Pick a song', 'error'); return; }
   if (!await preflight()) return;
 
   const btn = $('generate-lyrics-btn');
@@ -454,27 +458,37 @@ async function generateLyrics() {
   }
 }
 
-const TEMPLATE_STYLE = {};
-async function loadTemplates() {
-  const sel = $('lyrics-template');
+const SONG_IDEAS = {};      // id -> {theme, template, style, label}
+async function loadSongIdeas() {
+  const sel = $('lyrics-song');
   if (!sel) return;
   try {
-    const data = await api('GET', '/api/templates');
-    (data.templates || []).forEach((t) => {
-      TEMPLATE_STYLE[t.id] = t.style;
-      const opt = document.createElement('option');
-      opt.value = t.id; opt.textContent = t.label;
-      sel.appendChild(opt);
+    const data = await api('GET', '/api/song-ideas');
+    const groups = {};
+    (data.ideas || []).forEach((it) => {
+      SONG_IDEAS[it.id] = it;
+      (groups[it.group] = groups[it.group] || []).push(it);
     });
-  } catch (_) { /* templates are optional — leave the free-form choice only */ }
+    Object.keys(groups).forEach((g) => {
+      const og = document.createElement('optgroup');
+      og.label = g;
+      groups[g].forEach((it) => {
+        const opt = document.createElement('option');
+        opt.value = it.id; opt.textContent = it.label;
+        og.appendChild(opt);
+      });
+      sel.appendChild(og);
+    });
+    // default to the first real song rather than the "custom" placeholder
+    const first = (data.ideas || [])[0];
+    if (first) { sel.value = first.id; applySongChoice(); }
+  } catch (_) { /* ideas optional — the custom option still works */ }
 }
 
-function applyTemplateStyle() {
-  const st = TEMPLATE_STYLE[$('lyrics-template').value];
-  const styleSel = $('lyrics-style');
-  if (st && styleSel && Array.from(styleSel.options).some((o) => o.value === st)) {
-    styleSel.value = st;                    // pre-fill a matching music style
-  }
+function applySongChoice() {
+  const sel = $('lyrics-song');
+  const field = $('custom-theme-field');
+  if (field) field.hidden = !sel || sel.value !== '__custom__';
 }
 
 async function saveLyrics(silent) {
@@ -786,7 +800,7 @@ function wire() {
   $('project-select').addEventListener('change', (e) => { if (e.target.value) selectProject(e.target.value); });
 
   $('generate-lyrics-btn').addEventListener('click', generateLyrics);
-  if ($('lyrics-template')) $('lyrics-template').addEventListener('change', applyTemplateStyle);
+  if ($('lyrics-song')) $('lyrics-song').addEventListener('change', applySongChoice);
   $('save-lyrics-btn').addEventListener('click', () => saveLyrics(false));
   $('lyrics-textarea').addEventListener('blur', () => saveLyrics(true));
   $('lyrics-language').addEventListener('change', () => saveLyrics(true));
@@ -818,7 +832,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   wire();
   renderStepper();
   focusStage('project');
-  loadTemplates();
+  loadSongIdeas();
   await loadProjects();
   checkHealth();
   setInterval(checkHealth, 30000);
