@@ -91,6 +91,19 @@ def _petal(s=26):
     return img
 
 
+def _mouth_open(w=76, h=56):
+    """A cartoon open-mouth shape (dark interior + red tongue) that scales open/shut
+    for VISIBLE lip sync — the rotate-the-cutout trick was too subtle."""
+    from PIL import Image, ImageDraw, ImageFilter
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.ellipse((3, 3, w - 3, h - 3), fill=(28, 22, 24, 255))               # dark outline
+    d.ellipse((7, 7, w - 7, h - 7), fill=(120, 45, 55, 255))              # mouth interior
+    d.ellipse((w * 0.22, h * 0.52, w * 0.78, h - 8), fill=(210, 95, 115, 255))  # tongue
+    d.ellipse((10, 9, w - 10, h * 0.42), fill=(245, 245, 245, 255))       # upper teeth
+    return img.filter(ImageFilter.GaussianBlur(1))
+
+
 def _shadow(w=340, h=110):
     from PIL import Image, ImageDraw, ImageFilter
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
@@ -100,7 +113,7 @@ def _shadow(w=340, h=110):
 
 
 _MAKERS = {"cloud": _soft_cloud, "sparkle": _sparkle, "star": _star, "shadow": _shadow,
-           "flatcloud": _flat_cloud, "bird": _bird, "petal": _petal}
+           "flatcloud": _flat_cloud, "bird": _bird, "petal": _petal, "mouth_open": _mouth_open}
 
 
 def ensure_fx(name: str) -> Path:

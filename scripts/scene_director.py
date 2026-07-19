@@ -266,39 +266,40 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
                        "z": hd["z"], "parent": hd.get("parent", "body"),
                        "anchor": list(hd["anchor"]), "keyframes": _head_motion(hoff, dur, intensity)})
 
-    # --- mouth: lip-sync on words, else beat-bob (Hindi/low-conf/non-singing) ---
+    # --- mouth: a dark open-mouth shape that scales OPEN/SHUT for visible lip sync
+    #     (rotating the cutout was too subtle). Rides the head; opens on vocals. ---
     if "mouth" in parts:
         m = parts["mouth"]
-        # offset is measured from the mouth's PARENT anchor (head when articulated)
         mparent = m.get("parent", "body")
         pa = parts["head"]["anchor"] if (mparent == "head" and "head" in parts) else ba
         moff = [m["anchor"][0] - pa[0], m["anchor"][1] - pa[1]]
-        mkf = [{"t": 0.0, "pos": moff, "rot": 0, "easing": "ease_in_out"}]
-        if words:
-            # precise per-word sync (English, high word confidence)
+        try:
+            import gen_fx
+            mimg = str(gen_fx.ensure_fx("mouth_open"))
+        except Exception:  # noqa: BLE001
+            mimg = str(rig_dir / m["image"])
+        OPEN, SHUT = 1.0, 0.06                    # scale of the open-mouth sprite
+        mkf = [{"t": 0.0, "pos": moff, "scale": SHUT, "easing": "ease_in_out"}]
+        if words:                                 # precise per-word (English)
             for w in words:
                 o, c = rel(w["start"]), rel(w["end"])
-                mkf += [{"t": max(0.0, o - 0.05), "pos": moff, "rot": 0, "easing": "ease_out"},
-                        {"t": o, "pos": moff, "rot": 24, "easing": "ease_in_out"},
-                        {"t": min(dur, c), "pos": moff, "rot": 0, "easing": "ease_in_out"}]
+                mkf += [{"t": max(0.0, o - 0.04), "pos": moff, "scale": SHUT, "easing": "ease_out"},
+                        {"t": o, "pos": moff, "scale": OPEN, "easing": "ease_in_out"},
+                        {"t": min(dur, c), "pos": moff, "scale": SHUT, "easing": "ease_in_out"}]
             lip = f"word-sync ({len(words)} words)"
-        else:
-            # Hindi / low word-confidence: flap the mouth in a singing rhythm during
-            # actual VOCAL activity (word time windows, text ignored), closing in the
-            # instrumental gaps. A music video => the on-screen character lip-syncs,
-            # so this fires regardless of the per-scene `sings` guess.
+        else:                                     # singing flap during vocal activity
             vwin = [(rel(w["start"]), rel(min(w.get("end", w["start"] + 0.35), t1)))
                     for w in musicmap.get("words", []) if start <= w.get("start", -1) < t1]
             t = 0.0
             while t <= dur + 1e-6:
                 singing = (not vwin) or any(a - 0.06 <= t <= b + 0.06 for a, b in vwin)
-                rot = (24 if int(t / 0.18) % 2 == 0 else 4) if singing else 0
-                mkf.append({"t": round(t, 3), "pos": moff, "rot": rot, "easing": "ease_in_out"})
-                t += 0.09
+                sc = (OPEN if int(t / 0.2) % 2 == 0 else SHUT) if singing else SHUT
+                mkf.append({"t": round(t, 3), "pos": moff, "scale": round(sc, 3), "easing": "ease_in_out"})
+                t += 0.1
             lip = f"singing flap ({len(vwin)} vocal windows)"
-        mkf.append({"t": round(dur, 3), "pos": moff, "rot": 0})
-        layers.append({"name": "mouth", "image": str(rig_dir / m["image"]),
-                       "z": m["z"], "parent": mparent, "anchor": list(m["anchor"]), "keyframes": mkf})
+        mkf.append({"t": round(dur, 3), "pos": moff, "scale": SHUT})
+        layers.append({"name": "mouth", "image": mimg, "z": m["z"], "parent": mparent,
+                       "anchor": [38, 28], "keyframes": mkf})     # 38,28 = sprite centre
     else:
         lip = "no mouth part"
 

@@ -174,16 +174,16 @@ def articulate_rig(rig_dir, rig=None):
     """Split body.png into an independently-movable HEAD + torso, so the renderer can
     nod/tilt the head — real body movement, not just a sliding image. The head is cut
     at the neck (found from the face-skin blob's chin) with overlap so a small tilt
-    never opens a gap. Idempotent; the mouth re-parents to the head. Returns the rig."""
+    never opens a gap. Also fixes the mouth anchor to the face centre (the region
+    heuristic sometimes lands on a cheek). Re-runnable: always reads the original
+    body.png. The mouth re-parents to the head. Returns the rig."""
     import numpy as np
     from PIL import Image
     from scipy import ndimage
     rig_dir = Path(rig_dir)
     rig = rig or json.loads((rig_dir / "rig.json").read_text(encoding="utf-8"))
     parts = rig["parts"]
-    if "head" in parts:
-        return rig
-    body = Image.open(rig_dir / parts["body"]["image"]).convert("RGBA")
+    body = Image.open(rig_dir / "body.png").convert("RGBA")   # always the full original
     arr = np.asarray(body); A = arr[:, :, 3]
     R, G, B = arr[:, :, 0].astype(int), arr[:, :, 1].astype(int), arr[:, :, 2].astype(int)
     solid = A > 40
@@ -201,14 +201,21 @@ def articulate_rig(rig_dir, rig=None):
     else:
         chin = y0 + int(bh * 0.32)
     neck_y = min(y1, chin + int(bh * 0.03)); overlap = int(bh * 0.05)
+    # head-centre x from the head band (more reliable than whole-body median when the
+    # hair is asymmetric); mouth sits just above the neck, at the head centre.
+    hmask = solid.copy(); hmask[neck_y:, :] = False
+    hxs = np.where(hmask.any(axis=0))[0]
+    head_cx = int((int(hxs.min()) + int(hxs.max())) / 2) if hxs.size else cx
+    mouth_y = neck_y + int(bh * 0.008)     # right at the chin/mouth line
     head = arr.copy(); head[neck_y + overlap:, :, 3] = 0     # head + a little neck
     torso = arr.copy(); torso[:neck_y, :, 3] = 0             # everything from neck down
     Image.fromarray(head, "RGBA").save(rig_dir / "head.png")
     Image.fromarray(torso, "RGBA").save(rig_dir / "torso.png")
     parts["body"]["image"] = "torso.png"                    # 'body' now draws the torso
-    parts["head"] = {"image": "head.png", "anchor": [cx, neck_y], "z": 3, "parent": "body"}
+    parts["head"] = {"image": "head.png", "anchor": [head_cx, neck_y], "z": 3, "parent": "body"}
     if "mouth" in parts:
-        parts["mouth"]["parent"] = "head"                   # mouth rides the head
+        parts["mouth"]["anchor"] = [head_cx, mouth_y]        # just above the neck = mouth
+        parts["mouth"]["parent"] = "head"                    # mouth rides the head
     (rig_dir / "rig.json").write_text(json.dumps(rig, indent=2))
     return rig
 
