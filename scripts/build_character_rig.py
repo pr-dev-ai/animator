@@ -191,22 +191,38 @@ def articulate_rig(rig_dir, rig=None):
     if not len(ys):
         return rig
     y0, y1 = int(ys.min()), int(ys.max()); bh = y1 - y0; cx = int(np.median(xs))
-    skin = (A > 60) & (R >= G - 4) & (G >= B - 4) & (R - B > 10) & (R < 250) & solid
-    band = skin.copy(); band[y0 + int(bh * 0.45):, :] = False
-    fl, fn = ndimage.label(band); axis = float(np.median(xs))
-    if fn:
-        face = fl == min(range(1, fn + 1),
-                         key=lambda c: abs(float(np.median(np.where((fl == c).any(axis=0))[0])) - axis))
-        chin = int(np.where(face.any(axis=1))[0].max())
-    else:
-        chin = y0 + int(bh * 0.32)
-    neck_y = min(y1, chin + int(bh * 0.03)); overlap = int(bh * 0.05)
-    # head-centre x from the head band (more reliable than whole-body median when the
-    # hair is asymmetric); mouth sits just above the neck, at the head centre.
-    hmask = solid.copy(); hmask[neck_y:, :] = False
-    hxs = np.where(hmask.any(axis=0))[0]
-    head_cx = int((int(hxs.min()) + int(hxs.max())) / 2) if hxs.size else cx
-    mouth_y = neck_y + int(bh * 0.008)     # right at the chin/mouth line
+    x0b, x1b = int(xs.min()), int(xs.max()); bw = x1b - x0b; cxf = (x0b + x1b) / 2
+    # Locate the mouth from the EYES (big white sclera blobs) — far more robust across
+    # kids/adults/elderly than chin detection. Filter to small, central blobs in the
+    # head band so white clothing (e.g. a saree) can't masquerade as an eye.
+    white = (R > 200) & (G > 200) & (B > 200) & solid
+    eb = white.copy(); eb[y0 + int(bh * 0.35):, :] = False
+    lbl, n = ndimage.label(eb)
+    eye_y = eye_cx = eye_h = None
+    if n:
+        cand = []
+        for c in range(1, n + 1):
+            cys, cxs = np.where(lbl == c)
+            if cxs.size < 15 or cxs.size > 0.02 * bw * bh:          # not noise / clothing
+                continue
+            if abs(float(np.median(cxs)) - cxf) > 0.32 * bw:        # eyes are central
+                continue
+            cand.append((cxs.size, cys, cxs))
+        cand.sort(key=lambda t: -t[0])
+        if cand:
+            eys = np.concatenate([c[1] for c in cand[:2]])
+            exs = np.concatenate([c[2] for c in cand[:2]])
+            eye_y = int(np.median(eys)); eye_cx = int(np.median(exs))
+            eye_h = max(int(eys.max() - eys.min()), int(bh * 0.03))
+    # sane eyes: in the upper head AND small (real eyes aren't tall — a saree is)
+    if eye_y is not None and (eye_y - y0) <= 0.28 * bh and eye_h <= int(bh * 0.10):
+        mouth_y = int(eye_y + 1.7 * eye_h); head_cx = eye_cx
+    else:                                                   # fallback: fixed proportion
+        mouth_y = y0 + int(bh * 0.18)
+        hm = solid.copy(); hm[y0 + int(bh * 0.25):, :] = False
+        hxs = np.where(hm.any(axis=0))[0]
+        head_cx = int((int(hxs.min()) + int(hxs.max())) / 2) if hxs.size else cx
+    neck_y = min(y1, mouth_y + int(bh * 0.03)); overlap = int(bh * 0.05)   # head cut below mouth
     head = arr.copy(); head[neck_y + overlap:, :, 3] = 0     # head + a little neck
     torso = arr.copy(); torso[:neck_y, :, 3] = 0             # everything from neck down
     Image.fromarray(head, "RGBA").save(rig_dir / "head.png")
