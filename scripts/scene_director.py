@@ -22,6 +22,7 @@ from pathlib import Path
 CANVAS = (1152, 768)
 FPS = 24
 WORD_CONF_MIN = 0.65   # English ~0.79 fires lip-sync; Hindi ~0.56 -> beat-only
+MOUTH_FLAP_ENABLED = False   # overlaid open-mouth read worse than the drawn mouth; off
 
 import math
 _CAMERA = {   # (zoom0, zoom1, pan_dx over shot as fraction of width)
@@ -266,9 +267,10 @@ def author_scene(choreo: dict, rig: dict, rig_dir: Path, musicmap: dict,
                        "z": hd["z"], "parent": hd.get("parent", "body"),
                        "anchor": list(hd["anchor"]), "keyframes": _head_motion(hoff, dur, intensity)})
 
-    # --- mouth: a dark open-mouth shape that scales OPEN/SHUT for visible lip sync
-    #     (rotating the cutout was too subtle). Rides the head; opens on vocals. ---
-    if "mouth" in parts:
+    # --- mouth flap DISABLED (MOUTH_FLAP_ENABLED): the overlaid open-mouth shape read
+    #     worse than the character's own drawn mouth. Kept behind a flag pending a new
+    #     animation approach; the drawn mouth (part of head.png) stays static. ---
+    if "mouth" in parts and MOUTH_FLAP_ENABLED:
         m = parts["mouth"]
         mparent = m.get("parent", "body")
         pa = parts["head"]["anchor"] if (mparent == "head" and "head" in parts) else ba
