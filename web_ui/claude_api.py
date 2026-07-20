@@ -930,7 +930,7 @@ def _parse_scene_objects(text: str) -> list:
 
 def _fallback_choreo(reason: str = "default (Claude unavailable)") -> dict:
     """Sane choreography when Claude can't direct a scene."""
-    return {"character": "", "setting": "sunny park meadow", "sings": True,
+    return {"character": "", "setting": "sunny park meadow", "bg_prompt": "", "sings": True,
             "body_motion": "bob", "camera": "push_in", "intensity": 0.6,
             "mood": "happy", "reason": reason}
 
@@ -978,6 +978,13 @@ def direct_scenes(shots: list[dict]) -> dict:
             "for a true scenery/title moment),\n"
             '  "setting" (echo the scene\'s assigned setting if given; otherwise 2-5 '
             'words for the location, NO animals or characters),\n'
+            '  "bg_prompt" (a VIVID, detailed image prompt for JUST the background of '
+            "this scene — location, time of day, weather, lighting, mood, foreground "
+            "and distant details, colour palette, and an art style that fits (vary it "
+            "across scenes: e.g. soft storybook watercolour, bold flat cartoon, warm "
+            "anime background, hand-painted illustration, cosy gouache). Make each "
+            "scene's background distinct and interesting. NO people, NO animals, NO "
+            'characters — scenery only),\n'
             '  "sings" (boolean: is this character singing/vocalising here? drives lip-sync),\n'
             f'  "body_motion" (one of {", ".join(_BODY_MOTIONS)}),\n'
             f'  "camera" (one of {", ".join(_CAMERAS)}),\n'
@@ -989,9 +996,9 @@ def direct_scenes(shots: list[dict]) -> dict:
             "Return ONLY a JSON array, one object per scene.\n\n"
             f"Scenes:\n{json.dumps(lines, indent=2)}"
         )
-        # Budget ~300 tokens per scene object so a long shot list isn't truncated
-        # mid-array (which used to drop every scene to the empty-character fallback).
-        max_tokens = max(2048, min(8000, 400 + 300 * len(lines)))
+        # Budget ~420 tokens per scene object (bg_prompt is verbose) so a long shot
+        # list isn't truncated mid-array (which drops scenes to the empty fallback).
+        max_tokens = max(2048, min(12000, 500 + 420 * len(lines)))
         response = client.messages.create(
             model="claude-haiku-4-5-20251001", max_tokens=max_tokens,
             messages=[{"role": "user", "content": user_prompt}],
@@ -1012,6 +1019,7 @@ def direct_scenes(shots: list[dict]) -> dict:
                 result[sid] = {
                     "character": character,
                     "setting": setting[:80],
+                    "bg_prompt": str(item.get("bg_prompt", "")).strip()[:400],
                     "sings": bool(item.get("sings", True)),
                     "body_motion": item.get("body_motion") if item.get("body_motion") in _BODY_MOTIONS else "bob",
                     "camera": item.get("camera") if item.get("camera") in _CAMERAS else "push_in",

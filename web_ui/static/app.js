@@ -16,7 +16,6 @@ const STAGES = [
   { id: 'music',      icon: '🎵', name: 'Music' },
   { id: 'storyboard', icon: '🖼️', name: 'Storyboard' },
   { id: 'animate',    icon: '🎬', name: 'Animate' },
-  { id: 'video',      icon: '🎞️', name: 'Video' },
 ];
 
 const LANG_NAME_TO_CODE = { English: 'en', Hindi: 'hi' };
@@ -210,9 +209,6 @@ function stageState(id) {
       if (hasAnim) return { status: 'done', locked: false };  // completed artifact never locks
       if (!hasImages) return { status: 'locked', locked: true };
       return { status: 'available', locked: false };
-    case 'video':
-      if (!hasImages && !hasAnim) return { status: 'locked', locked: true };
-      return { status: hasVideo ? 'done' : 'available', locked: false };
     default:
       return { status: 'available', locked: false };
   }
@@ -281,7 +277,6 @@ function focusStage(id) {
   if (id === 'music') refreshMusicStage();
   if (id === 'storyboard') loadGallery();
   if (id === 'animate') refreshAnimateStage();
-  if (id === 'video') refreshVideoStage();
 }
 
 // ---------------------------------------------------------------------------
@@ -304,10 +299,6 @@ function updateChrome() {
   const s = state.status;
   const hasVideo = !!(s && (s.has_animation || s.has_animatic));
 
-  const fv = $('final-video-btn');
-  fv.classList.toggle('dim', !hasVideo);
-  fv.disabled = !hasVideo;
-
   // Media bar audio (song)
   const mbAudio = $('mb-audio');
   const mbTitle = $('mb-title');
@@ -323,7 +314,7 @@ function updateChrome() {
     delete mbAudio.dataset.for;
     mbTitle.textContent = state.project ? `${state.project}` : 'Nothing loaded';
   }
-  mbVideoBtn.hidden = !hasVideo;
+  if (mbVideoBtn) mbVideoBtn.hidden = !hasVideo;
 }
 
 // ---------------------------------------------------------------------------
@@ -711,6 +702,7 @@ function buildAnimation() {
 function refreshVideoStage() {
   const s = state.status;
   const player = $('final-player');
+  if (!player) return;                 // Video stage removed — nothing to refresh
   const empty = $('final-empty');
   const title = $('final-player-title');
 
@@ -737,6 +729,7 @@ function refreshVideoStage() {
 function renderSummary() {
   const s = state.status;
   const ul = $('summary-list');
+  if (!ul) return;                     // Video stage (with the summary) removed
   ul.innerHTML = '';
   const rows = [
     ['Project', state.project || '—', !!state.project],
@@ -815,8 +808,7 @@ function wire() {
   $('refresh-gallery-btn').addEventListener('click', loadGallery);
   $('build-animation-btn').addEventListener('click', buildAnimation);
 
-  $('final-video-btn').addEventListener('click', () => focusStage('video'));
-  $('mb-video-btn').addEventListener('click', () => focusStage('video'));
+  if ($('mb-video-btn')) $('mb-video-btn').addEventListener('click', () => focusStage('animate'));
 
   $('activity-toggle').addEventListener('click', () => openDrawer($('activity-drawer').hidden));
   $('clear-log-btn').addEventListener('click', () => { $('activity-log').textContent = ''; });

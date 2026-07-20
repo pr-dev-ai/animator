@@ -33,9 +33,9 @@ CANVAS = (1152, 768)
 # Fresh start on every creation: no reuse of cached plates/rigs/renders between builds
 # (backgrounds + characters are regenerated from Claude's prompts each time).
 FRESH_BUILD = True
-GROUND_FRAC = 0.90        # character feet sit here (fraction of canvas height)
-CHAR_HEIGHT_FRAC = 0.55   # character height as a fraction of canvas height (leaves
-                          # margin so an out-swung arm/leg doesn't clip the frame)
+GROUND_FRAC = 0.88        # character feet sit here (fraction of canvas height)
+CHAR_HEIGHT_FRAC = 0.42   # character height as a fraction of canvas height — smaller
+                          # so the figure sits IN the scenery, not looming over it
 CHAR_X_FRAC = 0.42        # horizontal placement of the character
 
 
@@ -144,12 +144,13 @@ def prepare_assets(project: str) -> Generator[str, None, None]:
         ch = choreo.get(sid, {})
         character = (ch.get("character") or "").strip()
         setting = ch.get("setting") or "sunny park meadow"
+        bg_prompt = ch.get("bg_prompt") or ""
 
-        plate = plate_dir / f"plate_{_sha(setting)}.png"
+        plate = plate_dir / f"plate_{_sha(bg_prompt or setting)}.png"
         if not plate.is_file():
             yield f"[{idx}/{len(scenes)}] {sid}: generating background ({setting[:30]})..."
             try:
-                _gen_plate(setting, plate)
+                _gen_plate(setting, plate, bg_prompt)
             except Exception as exc:  # noqa: BLE001
                 yield f"  background gen failed ({exc})"
                 continue
@@ -245,15 +246,13 @@ def build_music_video(project: str, captions: bool = False) -> Generator[str, No
     plate_dir = OUTPUTS_DIR / "bg_plates"
 
     if FRESH_BUILD:
-        # No caching: wipe last run's plates, character rigs and per-scene renders so
-        # every creation is fresh — backgrounds and characters are regenerated from
-        # Claude's prompts each time, not reused.
-        yield "Fresh build: clearing cached backgrounds, rigs and renders..."
+        # Strong cache clear on every new video: wipe last run's background plates and
+        # per-scene renders so backgrounds regenerate fresh from Claude's prompts.
+        # Character RIGS are assets, not cache — they're REUSED (built once per
+        # character), so we don't rebuild the same characters again and again.
+        yield "Fresh build: clearing cached backgrounds and renders..."
         for p in plate_dir.glob("plate_*.png"):
             p.unlink(missing_ok=True)
-        for d in (OUTPUTS_DIR / "char_lib").glob("*"):
-            if d.is_dir():
-                shutil.rmtree(d, ignore_errors=True)
         shutil.rmtree(build_dir, ignore_errors=True)
     build_dir.mkdir(parents=True, exist_ok=True)
     plate_dir.mkdir(parents=True, exist_ok=True)
@@ -265,14 +264,15 @@ def build_music_video(project: str, captions: bool = False) -> Generator[str, No
         ch = choreo.get(sid, {})
         character = (ch.get("character") or "").strip()   # empty => background-only scene
 
-        # background plate from Claude's scenery-ONLY setting (never the character
+        # background plate from Claude's scenery-ONLY prompt (never the character
         # action — a scene "animals dancing" must not bake animals into the plate).
         setting = ch.get("setting") or "sunny park meadow"
-        plate = plate_dir / f"plate_{_sha(setting)}.png"
+        bg_prompt = ch.get("bg_prompt") or ""
+        plate = plate_dir / f"plate_{_sha(bg_prompt or setting)}.png"
         if not plate.is_file():
             yield f"[{idx}/{len(scenes)}] {sid}: generating background plate..."
             try:
-                _gen_plate(setting, plate)
+                _gen_plate(setting, plate, bg_prompt)
             except Exception as exc:  # noqa: BLE001
                 yield f"  plate gen failed ({exc}); reusing a park plate"
                 fallbacks = list(plate_dir.glob("plate_*.png")) or list((OUTPUTS_DIR / "test_win_storyboards").glob("SH010.png"))
@@ -440,11 +440,14 @@ def _concat_and_mux(ffmpeg, section_mp4s, song, out_path, work_dir, subs_path=No
         concat.unlink(missing_ok=True)
 
 
-def _gen_plate(setting: str, out_path: Path):
-    """Generate a scenery-only background plate for *setting*."""
+def _gen_plate(setting: str, out_path: Path, bg_prompt: str = ""):
+    """Generate a scenery-only background plate. Uses Claude's rich, varied bg_prompt
+    when available (distinct art styles per scene), else the plain setting."""
     import subprocess
-    r = subprocess.run([sys.executable, str(SCRIPTS_DIR / "gen_background.py"), setting, out_path.stem],
-                       capture_output=True, text=True, timeout=600)
+    args = [sys.executable, str(SCRIPTS_DIR / "gen_background.py"), setting, out_path.stem]
+    if bg_prompt:
+        args.append(bg_prompt)
+    r = subprocess.run(args, capture_output=True, text=True, timeout=600)
     produced = OUTPUTS_DIR / "bg_plates" / f"{out_path.stem}.png"
     if produced.is_file() and produced != out_path:
         shutil.move(str(produced), str(out_path))

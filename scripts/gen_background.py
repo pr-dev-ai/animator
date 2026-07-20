@@ -10,19 +10,25 @@ ckpt = P._find_checkpoint()
 
 setting = sys.argv[1] if len(sys.argv) > 1 else "sunny park meadow with a pond"
 name = sys.argv[2] if len(sys.argv) > 2 else "park_pond"
-PROMPT = ("flat 2d cartoon background, flat color, bold clean outlines, cel shading, "
-          "children's cartoon illustration, simple shapes, bright and cheerful, "
-          f"{setting}, empty scenery, wide establishing shot, "
-          "no animals, no characters, no people")
+bg_prompt = sys.argv[3] if len(sys.argv) > 3 else ""   # Claude's rich, varied prompt
+
+if bg_prompt:
+    # use Claude's vivid, per-scene style/description; only enforce scenery-only
+    PROMPT = f"{bg_prompt}, empty scenery, wide establishing shot, no animals, no characters, no people"
+else:
+    PROMPT = ("children's illustration background, bright and cheerful, "
+              f"{setting}, empty scenery, wide establishing shot, "
+              "no animals, no characters, no people")
+# keep the anti-character / anti-photo guards, but DON'T fight painterly/watercolour
+# styles anymore — backgrounds are meant to vary now, not all be flat cartoon.
 NEG = ("animals, ducks, rabbits, cats, characters, people, person, creatures, foreground subject, "
-       "text, watermark, realistic, photo, painterly, soft shading, gradient, "
-       "3d render, detailed rendering, dark")
+       "text, watermark, signature, realistic photo, photograph, dark, blurry, deformed")
 
 # seed derived from the SETTING (not a fixed 555): otherwise similar prompts like
 # "village lane" / "village road" / "village square" all render the identical
 # composition. A per-setting seed gives each scene a distinct-looking background.
 import hashlib
-seed = int(hashlib.sha256(setting.encode("utf-8")).hexdigest(), 16) % (2 ** 31)
+seed = int(hashlib.sha256((bg_prompt or setting).encode("utf-8")).hexdigest(), 16) % (2 ** 31)
 wf = P._comfyui_workflow(PROMPT, NEG, f"bg_{name}", ckpt)
 for node in wf.values():
     if node.get("class_type") == "KSampler":
