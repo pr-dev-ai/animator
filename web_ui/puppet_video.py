@@ -30,6 +30,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 FPS = 24
 CANVAS = (1152, 768)
+# Fresh start on every creation: no reuse of cached plates/rigs/renders between builds
+# (backgrounds + characters are regenerated from Claude's prompts each time).
+FRESH_BUILD = True
 GROUND_FRAC = 0.90        # character feet sit here (fraction of canvas height)
 CHAR_HEIGHT_FRAC = 0.55   # character height as a fraction of canvas height (leaves
                           # margin so an out-swung arm/leg doesn't clip the frame)
@@ -239,12 +242,24 @@ def build_music_video(project: str, captions: bool = False) -> Generator[str, No
     choreo = direct_scenes(scenes)
 
     build_dir = OUTPUTS_DIR / "_puppet_build" / project
-    build_dir.mkdir(parents=True, exist_ok=True)
     plate_dir = OUTPUTS_DIR / "bg_plates"
+
+    if FRESH_BUILD:
+        # No caching: wipe last run's plates, character rigs and per-scene renders so
+        # every creation is fresh — backgrounds and characters are regenerated from
+        # Claude's prompts each time, not reused.
+        yield "Fresh build: clearing cached backgrounds, rigs and renders..."
+        for p in plate_dir.glob("plate_*.png"):
+            p.unlink(missing_ok=True)
+        for d in (OUTPUTS_DIR / "char_lib").glob("*"):
+            if d.is_dir():
+                shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(build_dir, ignore_errors=True)
+    build_dir.mkdir(parents=True, exist_ok=True)
     plate_dir.mkdir(parents=True, exist_ok=True)
 
-    rig_cache = {}
-    section_mp4s = []
+    rig_cache = {}     # in-memory only: one rig per character within THIS build,
+    section_mp4s = []  # so the character stays consistent across the video's scenes
     for idx, (s, start, dur) in enumerate(zip(scenes, starts, durs), 1):
         sid = s["shot_id"]
         ch = choreo.get(sid, {})
@@ -298,7 +313,7 @@ def build_music_video(project: str, captions: bool = False) -> Generator[str, No
         hsh = build_dir / f"{sid}.hash"
         nframes = round(dur * FPS)
 
-        if mp4.is_file() and hsh.is_file() and hsh.read_text(encoding="utf-8").strip() == want:
+        if not FRESH_BUILD and mp4.is_file() and hsh.is_file() and hsh.read_text(encoding="utf-8").strip() == want:
             yield f"[{idx}/{len(scenes)}] {sid} ({character}, {dur:.1f}s) — cached, skip"
             section_mp4s.append(mp4); continue
 
