@@ -18,10 +18,15 @@ NEG = ("animals, ducks, rabbits, cats, characters, people, person, creatures, fo
        "text, watermark, realistic, photo, painterly, soft shading, gradient, "
        "3d render, detailed rendering, dark")
 
+# seed derived from the SETTING (not a fixed 555): otherwise similar prompts like
+# "village lane" / "village road" / "village square" all render the identical
+# composition. A per-setting seed gives each scene a distinct-looking background.
+import hashlib
+seed = int(hashlib.sha256(setting.encode("utf-8")).hexdigest(), 16) % (2 ** 31)
 wf = P._comfyui_workflow(PROMPT, NEG, f"bg_{name}", ckpt)
 for node in wf.values():
     if node.get("class_type") == "KSampler":
-        node["inputs"]["seed"] = 555
+        node["inputs"]["seed"] = seed
 req = urllib.request.Request(f"{COMFY}/prompt", data=json.dumps({"prompt": wf}).encode(),
                              headers={"Content-Type": "application/json"})
 pid = json.loads(urllib.request.urlopen(req, timeout=30).read())["prompt_id"]
